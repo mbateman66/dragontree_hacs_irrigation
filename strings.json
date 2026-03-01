@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Dragontree Irrigation",
+        "description": "Set up the Dragontree Irrigation controller. Stations will be auto-discovered from the OpenSprinkler integration."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Only one instance of Dragontree Irrigation is allowed."
+    }
+  }
+}

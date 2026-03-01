@@ -1,0 +1,11 @@
+{
+  "domain": "dragontree_irrigation",
+  "name": "Dragontree Irrigation",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "",
+  "iot_class": "local_push",
+  "requirements": [],
+  "version": "1.0.0"
+}

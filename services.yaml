@@ -1,0 +1,158 @@
+add_station:
+  name: Add Station
+  description: Add a new station to the irrigation controller.
+  fields:
+    base_name:
+      name: Base Name
+      description: OpenSprinkler base name (e.g. front_yard). Used to build entity IDs.
+      required: true
+      selector:
+        text:
+    friendly_name:
+      name: Friendly Name
+      description: Human-readable display name.
+      required: true
+      selector:
+        text:
+    schedule_mode:
+      name: Schedule Mode
+      description: "Off, Normal, or Hot"
+      required: false
+      selector:
+        select:
+          options:
+            - "Off"
+            - "Normal"
+            - "Hot"
+    sensitive:
+      name: Sensitive
+      description: If true, station runs in Light rain mode.
+      required: false
+      selector:
+        boolean:
+
+update_station:
+  name: Update Station
+  description: Update top-level properties of a station.
+  fields:
+    station_id:
+      name: Station ID
+      required: true
+      selector:
+        text:
+    friendly_name:
+      name: Friendly Name
+      required: false
+      selector:
+        text:
+    schedule_mode:
+      name: Schedule Mode
+      required: false
+      selector:
+        select:
+          options:
+            - "Off"
+            - "Normal"
+            - "Hot"
+    sensitive:
+      name: Sensitive
+      required: false
+      selector:
+        boolean:
+    tracked:
+      name: Tracked
+      description: If false, station is excluded from scheduling.
+      required: false
+      selector:
+        boolean:
+
+remove_station:
+  name: Remove Station
+  description: Remove a station from the irrigation controller.
+  fields:
+    station_id:
+      name: Station ID
+      required: true
+      selector:
+        text:
+
+reorder_stations:
+  name: Reorder Stations
+  description: Set the execution order of stations.
+  fields:
+    station_ids:
+      name: Station IDs
+      description: List of station IDs in desired order.
+      required: true
+      selector:
+        object:
+
+update_schedule:
+  name: Update Station Schedule
+  description: Update the normal or hot schedule for a station.
+  fields:
+    station_id:
+      name: Station ID
+      required: true
+      selector:
+        text:
+    schedule_type:
+      name: Schedule Type
+      description: '"normal" or "hot"'
+      required: true
+      selector:
+        select:
+          options:
+            - "normal"
+            - "hot"
+    am:
+      name: Include in AM Queue
+      required: false
+      selector:
+        boolean:
+    pm:
+      name: Include in PM Queue
+      required: false
+      selector:
+        boolean:
+    days_of_week:
+      name: Days of Week
+      description: "List of day numbers: 0=Mon, 1=Tue, ..., 6=Sun"
+      required: false
+      selector:
+        object:
+    week_interval:
+      name: Week Interval
+      description: Run every N weeks.
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 8
+    duration:
+      name: Duration (seconds)
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 36000
+          unit_of_measurement: s
+
+move_station:
+  name: Move Station
+  description: Shift a station one position up or down in the run order.
+  fields:
+    station_id:
+      name: Station ID
+      required: true
+      selector:
+        text:
+    direction:
+      name: Direction
+      description: '"up" or "down"'
+      required: true
+      selector:
+        select:
+          options:
+            - "up"
+            - "down"
