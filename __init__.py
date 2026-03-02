@@ -185,7 +185,7 @@ def _register_dashboard(hass: HomeAssistant) -> None:
     }
 
     lovelace.dashboards[_DASHBOARD_URL] = LovelaceYAML(hass, _DASHBOARD_URL, config)
-    _register_panel(hass, _DASHBOARD_URL, "yaml", config, False)
+    _register_panel(hass, _DASHBOARD_URL, "yaml", config, True)
     _LOGGER.info("Irrigation dashboard registered at /%s", _DASHBOARD_URL)
 
 
