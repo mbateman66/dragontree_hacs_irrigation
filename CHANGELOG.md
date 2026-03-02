@@ -4,6 +4,28 @@ All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.0.2] - 2026-03-02
+
+### Added
+- Per-station **Moisture Sensor** panel in the Schedules view. Each station card
+  has a new collapsible panel (above Normal/Hot Schedule) where a soil moisture
+  sensor can be associated. Eligible sensors are filtered automatically to those
+  labelled both `soil` and `moisture` in the HA entity registry.
+- When a sensor is selected, the panel shows the live reading and a configurable
+  **Skip if above (%)** threshold. If the sensor reading exceeds the threshold the
+  station is excluded from all queues exactly as if Schedule Mode were **Off** —
+  reflected in the lookahead calendar and enforced at queue-build time.
+- The schedule updates live as moisture changes via a dedicated state-change
+  listener in the coordinator.
+
+### Fixed
+- Dashboard panel registration now uses `update=True` so the integration can be
+  reloaded without crashing with `ValueError: Overwriting panel`.
+- If post-platform setup fails, platforms are now torn down immediately so a
+  subsequent reload does not encounter "already been setup" errors.
+- `async_unload_entry` is now fully defensive and handles being called on a
+  partially-loaded entry.
+
 ## [1.0.1] - 2026-03-02
 
 ### Fixed
