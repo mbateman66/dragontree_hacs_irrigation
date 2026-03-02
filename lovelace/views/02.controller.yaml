@@ -1,0 +1,78 @@
+  ##########################################################################
+  # VIEW: Controller
+  # Global settings and current operational status
+  ##########################################################################
+  - title: Controller
+    path: controller
+    icon: mdi:tune
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: entities
+            title: Global Settings
+            entities:
+              - entity: switch.dragontree_irrigation_master_enable
+                name: Master Enable
+              - entity: select.dragontree_irrigation_rain_mode
+                name: Rain Mode
+              - entity: time.dragontree_irrigation_am_queue_start
+                name: AM Queue Start
+              - entity: time.dragontree_irrigation_pm_queue_start
+                name: PM Queue Start
+              - entity: number.dragontree_irrigation_lookahead_days
+                name: Lookahead Days
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: binary_sensor.dragontree_irrigation_queue_time_conflict
+                state: "on"
+            card:
+              type: markdown
+              content: ⚠️ **AM Queue Start must be before PM Queue Start.**
+
+      # ── Irrigation Status Card ──────────────────────────────────────────
+      - type: markdown
+        title: Irrigation Status
+        content: |
+          {% set rq = states('sensor.dragontree_irrigation_running_queue') %}
+          {% set cur_id = state_attr('sensor.dragontree_irrigation_running_queue', 'current_station_id') %}
+          {% set sched = state_attr('sensor.dragontree_irrigation_schedule', 'day_schedules') %}
+          {% set all_stations = state_attr('sensor.dragontree_irrigation_schedule', 'stations') %}
+          **Running Queue:** {{ rq | upper }}
+          {%- if rq not in ['idle', 'unavailable', 'unknown'] and cur_id %}
+
+          {%- set cur = (all_stations | selectattr('id', 'equalto', cur_id) | list | first) if all_stations else none %}
+          **Current Station:** {{ cur.friendly_name if cur else cur_id }}
+          **Station Time Remaining:** {{ states('sensor.dragontree_irrigation_' ~ cur_id ~ '_time_remaining') }}
+          {%- if sched %}
+          {%- set q_name = rq | lower %}
+          {%- set today = sched | first %}
+          {%- if q_name in today.queues %}
+          **Queue End:** {{ today.queues[q_name].end_time }}
+          {%- endif %}
+          {%- endif %}
+          {%- endif %}
+
+          {%- if sched %}
+          {%- set ns = namespace(found=false, next='None scheduled') %}
+          {%- set today = now().strftime('%Y-%m-%d') %}
+          {%- set current_time = now().strftime('%H:%M') %}
+          {%- for day in sched %}
+            {%- if not ns.found %}
+              {%- for qname in ['am', 'pm'] %}
+                {%- if not ns.found and qname in day.queues %}
+                  {%- set q = day.queues[qname] %}
+                  {%- if q.stations | length > 0 and (day.date > today or (day.date == today and q.start_time > current_time)) %}
+                    {%- set ns.found = true %}
+                    {%- set ns.next = day.day_of_week ~ ' ' ~ day.date ~ ' ' ~ q.start_time  %}
+                  {%- endif %}
+                {%- endif %}
+              {%- endfor %}
+            {%- endif %}
+          {%- endfor %}
+
+          **Next Scheduled:** {{ ns.next }}
+          {%- else %}
+          *No schedule data — install and configure Dragontree Irrigation first.*
+          {%- endif %}
+

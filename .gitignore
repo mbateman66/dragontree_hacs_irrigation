@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+
+# Home Assistant
+*.db
+*.log
+.storage/
+
+# Environments
+.env
+.venv/
+venv/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Distribution
+*.egg-info/
+dist/
+build/

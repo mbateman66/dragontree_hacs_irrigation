@@ -1,0 +1,8 @@
+##############################################################################
+# Dragontree Irrigations Dashboard
+#
+# Views are loaded from the views/ subdirectory.
+# This file lives inside the integration package and is served directly
+# from custom_components/dragontree_irrigation/lovelace/ — no copying needed.
+##############################################################################
+views: !include_dir_merge_list views/

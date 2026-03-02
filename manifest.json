@@ -3,7 +3,7 @@
   "name": "Dragontree Irrigation",
   "codeowners": [],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": ["lovelace", "http", "frontend"],
   "documentation": "",
   "iot_class": "local_push",
   "requirements": [],

@@ -1,0 +1,10 @@
+  ##########################################################################
+  # VIEW: Calendar View
+  ##########################################################################
+  - title: Calendar View
+    path: calendar-view
+    type: panel
+    icon: mdi:calendar
+    cards:
+      # ── Schedule Calendar ────────────────────────────────────────
+      - type: custom:dragontree-irrigation-schedule-calendar

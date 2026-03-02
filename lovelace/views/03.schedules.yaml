@@ -1,0 +1,10 @@
+  ##########################################################################
+  # VIEW: Schedules — (dynamic custom card)
+  # Per-station schedules
+  ##########################################################################
+  - title: Schedules
+    path: schedules
+    icon: mdi:clock-outline
+    type: panel
+    cards:
+      - type: custom:dragontree-irrigation-station-schedules

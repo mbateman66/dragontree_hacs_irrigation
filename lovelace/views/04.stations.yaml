@@ -1,0 +1,11 @@
+
+  ##########################################################################
+  # VIEW: Manage Stations (dynamic custom card)
+  # Manage all stations from OpenSprinkler in one table
+  ##########################################################################
+  - title: Manage Stations
+    path: manage-stations
+    icon: mdi:cog
+    type: panel
+    cards:
+      - type: custom:dragontree-irrigation-station-manager
