@@ -12,14 +12,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import voluptuous as vol
-from homeassistant.components.frontend import add_extra_js_url, async_remove_panel
+from homeassistant.components.frontend import async_remove_panel
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.components.lovelace import _register_panel
 from homeassistant.components.lovelace.dashboard import LovelaceYAML
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.storage import Store
 
 from .const import (
     DOMAIN,
@@ -84,14 +83,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _register_services(hass, coordinator)
 
-    # Register the Lovelace card JS module
-    _register_frontend(hass)
+    # Register the Lovelace card JS in lovelace_resources (Lovelace waits for these before rendering)
+    await _ensure_lovelace_resource(hass)
 
     # Register the Irrigation dashboard in the HA sidebar
     _register_dashboard(hass)
-
-    # One-time migration: remove stale /local/* entries from lovelace_resources store
-    await _cleanup_old_lovelace_resource(hass)
 
     return True
 
@@ -131,15 +127,39 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         lovelace.dashboards.pop(_DASHBOARD_URL, None)
 
 
-def _register_frontend(hass: HomeAssistant) -> None:
-    """Register the bundled Lovelace card JS as a frontend module.
+async def _ensure_lovelace_resource(hass: HomeAssistant) -> None:
+    """Register the card JS via Lovelace's ResourceStorageCollection.
 
-    add_extra_js_url injects the URL into every Lovelace page load — equivalent
-    to a resources entry but done entirely at runtime, no storage file needed.
+    Writing directly to the Store file only updates the JSON on disk — it
+    bypasses HA's in-memory resource collection and never sends a WebSocket
+    push to connected frontends.  Using the collection API keeps the in-memory
+    state, the storage file, and all connected clients in sync.
+
+    The collection's async_create_item() expects "res_type" (the WS field name),
+    which is internally converted to "type" when stored.
     """
     url = f"{_JS_URL_BASE}/dragontree-irrigation-cards.js?v={_VERSION}"
-    add_extra_js_url(hass, url)
-    _LOGGER.debug("Registered Lovelace card module: %s", url)
+    lovelace = hass.data.get("lovelace")
+    if lovelace is None:
+        _LOGGER.warning("Lovelace not initialised — cannot register resource")
+        return
+
+    resources = getattr(lovelace, "resources", None)
+    if resources is None or not hasattr(resources, "async_create_item"):
+        _LOGGER.warning("Lovelace resource collection not available (resource_mode may not be storage)")
+        return
+
+    # Remove any existing entries for this integration (old version or old path)
+    for item in list(resources.async_items()):
+        item_url = item.get("url", "")
+        if _JS_URL_BASE in item_url or "dragontree-irrigation" in item_url:
+            try:
+                await resources.async_delete_item(item["id"])
+            except Exception:
+                pass
+
+    await resources.async_create_item({"res_type": "module", "url": url})
+    _LOGGER.info("Registered Lovelace resource: %s", url)
 
 
 def _register_dashboard(hass: HomeAssistant) -> None:
@@ -167,32 +187,6 @@ def _register_dashboard(hass: HomeAssistant) -> None:
     lovelace.dashboards[_DASHBOARD_URL] = LovelaceYAML(hass, _DASHBOARD_URL, config)
     _register_panel(hass, _DASHBOARD_URL, "yaml", config, False)
     _LOGGER.info("Irrigation dashboard registered at /%s", _DASHBOARD_URL)
-
-
-async def _cleanup_old_lovelace_resource(hass: HomeAssistant) -> None:
-    """Remove stale /local/* resource entries for this integration.
-
-    Previous versions stored the card URL in .storage/lovelace_resources.
-    That approach is replaced by add_extra_js_url — this function removes
-    any leftover entries on the first run after upgrading.
-    """
-    store = Store(hass, 1, "lovelace_resources", minor_version=1)
-    data = await store.async_load()
-    if data is None:
-        return
-
-    items: list[dict] = data.get("items", [])
-    cleaned = [
-        i for i in items
-        if "dragontree-irrigation" not in i.get("url", "")
-    ]
-    if len(cleaned) != len(items):
-        await store.async_save({"items": cleaned})
-        _LOGGER.info(
-            "Removed %d stale lovelace_resources entry(s) for %s",
-            len(items) - len(cleaned),
-            DOMAIN,
-        )
 
 
 def _register_services(hass: HomeAssistant, coordinator: IrrigationCoordinator) -> None:
