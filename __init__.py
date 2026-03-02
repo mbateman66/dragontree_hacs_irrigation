@@ -198,6 +198,9 @@ def _register_services(hass: HomeAssistant, coordinator: IrrigationCoordinator) 
     async def handle_update_station(call: ServiceCall) -> None:
         station_id = call.data["station_id"]
         data = {k: v for k, v in call.data.items() if k != "station_id"}
+        # Treat empty string as None to allow clearing the moisture sensor association
+        if "moisture_sensor" in data and not data["moisture_sensor"]:
+            data["moisture_sensor"] = None
         await coordinator.async_update_station(station_id, data)
 
     async def handle_remove_station(call: ServiceCall) -> None:
@@ -245,6 +248,10 @@ def _register_services(hass: HomeAssistant, coordinator: IrrigationCoordinator) 
                 vol.Optional("schedule_mode"): vol.In(["Off", "Normal", "Hot"]),
                 vol.Optional("sensitive"): cv.boolean,
                 vol.Optional("tracked"): cv.boolean,
+                vol.Optional("moisture_sensor"): cv.string,
+                vol.Optional("moisture_max"): vol.All(
+                    vol.Coerce(float), vol.Range(min=0, max=100)
+                ),
             }
         ),
     )

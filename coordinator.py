@@ -83,6 +83,8 @@ DEFAULT_STATION_TEMPLATE = {
     "normal_schedule": None,
     "hot_schedule": None,
     "last_run": None,
+    "moisture_sensor": None,
+    "moisture_max": None,
 }
 
 
@@ -112,6 +114,7 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         self._time_unsubs: list = []
         self._os_unsubs: list = []
         self._running_unsubs: list = []
+        self._moisture_unsubs: list = []
         self._queue_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------
@@ -136,6 +139,8 @@ class IrrigationCoordinator(DataUpdateCoordinator):
                 else:
                     s.pop("ignored", None)
                 s.setdefault("tracked", True)
+                s.setdefault("moisture_sensor", None)
+                s.setdefault("moisture_max", None)
 
         # Always merge-discover: add any OS stations not yet tracked.
         # On first run (no stored data) this populates _stations from scratch.
@@ -149,6 +154,7 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         self._setup_time_triggers()
         self._setup_os_listeners()
         self._setup_running_listeners()
+        self._setup_moisture_listeners()
 
     async def _merge_discover_stations(self) -> None:
         """Scan OpenSprinkler entity registry and add any stations not yet tracked.
@@ -270,6 +276,29 @@ class IrrigationCoordinator(DataUpdateCoordinator):
             async_track_state_change_event(self.hass, entity_ids, _station_running_changed)
         )
 
+    def _setup_moisture_listeners(self) -> None:
+        """Watch associated moisture sensors so schedule updates live as moisture changes."""
+        for unsub in self._moisture_unsubs:
+            unsub()
+        self._moisture_unsubs.clear()
+
+        entity_ids = [
+            s["moisture_sensor"]
+            for s in self._stations
+            if s.get("moisture_sensor")
+        ]
+        if not entity_ids:
+            return
+
+        @callback
+        def _moisture_changed(_event: Any) -> None:
+            self._regenerate_schedules()
+            self.async_set_updated_data(self._build_data())
+
+        self._moisture_unsubs.append(
+            async_track_state_change_event(self.hass, entity_ids, _moisture_changed)
+        )
+
     @callback
     def _handle_am_trigger(self, _now: datetime) -> None:
         if not self._global.get("master_enable"):
@@ -388,6 +417,18 @@ class IrrigationCoordinator(DataUpdateCoordinator):
             mode = station.get("schedule_mode", SCHEDULE_MODE_NORMAL)
             if mode == SCHEDULE_MODE_OFF:
                 continue
+
+            # Moisture sensor override: skip station if sensor reading > threshold
+            moisture_sensor = station.get("moisture_sensor")
+            moisture_max = station.get("moisture_max")
+            if moisture_sensor and moisture_max is not None:
+                sensor_state = self.hass.states.get(moisture_sensor)
+                if sensor_state is not None:
+                    try:
+                        if float(sensor_state.state) > float(moisture_max):
+                            continue
+                    except (ValueError, TypeError):
+                        pass
 
             schedule = (
                 station.get("hot_schedule") or deepcopy(DEFAULT_SCHEDULE)
@@ -613,6 +654,7 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         self._regenerate_schedules()
         self._setup_os_listeners()
         self._setup_running_listeners()
+        self._setup_moisture_listeners()
         await self._save()
         async_dispatcher_send(self.hass, SIGNAL_STATIONS_UPDATED)
         self.async_set_updated_data(self._build_data())
@@ -623,6 +665,7 @@ class IrrigationCoordinator(DataUpdateCoordinator):
             raise ValueError(f"Station '{station_id}' not found")
         station.update(data)
         self._regenerate_schedules()
+        self._setup_moisture_listeners()
         await self._save()
         self.async_set_updated_data(self._build_data())
 
@@ -646,6 +689,7 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         self._regenerate_schedules()
         self._setup_os_listeners()
         self._setup_running_listeners()
+        self._setup_moisture_listeners()
         await self._save()
         async_dispatcher_send(self.hass, SIGNAL_STATIONS_UPDATED)
         self.async_set_updated_data(self._build_data())
@@ -731,6 +775,9 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         for unsub in self._running_unsubs:
             unsub()
         self._running_unsubs.clear()
+        for unsub in self._moisture_unsubs:
+            unsub()
+        self._moisture_unsubs.clear()
 
 
 # ------------------------------------------------------------------

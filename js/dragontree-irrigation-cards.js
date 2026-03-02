@@ -504,6 +504,19 @@
       font-size: 0.88em;
     }
     .num-input:focus { outline: none; border-color: var(--primary-color, #03a9f4); }
+
+    .moisture-current {
+      font-size: 0.88em; font-weight: 500;
+      color: var(--primary-text-color);
+      padding: 3px 8px;
+      background: var(--secondary-background-color, #f5f5f5);
+      border: 1px solid var(--divider-color, #e0e0e0);
+      border-radius: 6px;
+    }
+    .moisture-current.overmax {
+      color: var(--error-color, #db4437);
+      border-color: var(--error-color, #db4437);
+    }
   `;
 
   class DragontreeStationSchedules extends HTMLElement {
@@ -578,10 +591,35 @@
               <span class="slider"></span>
             </label>
           </div>
+          ${this._moisturePanelHTML(sid)}
           ${this._panelHTML(sid, 'normal')}
           ${this._panelHTML(sid, 'hot')}
         </div>`;
       return el;
+    }
+
+    _moisturePanelHTML(sid) {
+      return `
+        <details class="panel">
+          <summary>Moisture Sensor</summary>
+          <div class="panel-body">
+            <div class="entity-row">
+              <span class="row-label">Sensor</span>
+              <select class="mode-select" data-moisture-select data-sid="${sid}">
+                <option value="">None</option>
+              </select>
+            </div>
+            <div class="entity-row moisture-value-row" style="display:none">
+              <span class="row-label">Current Reading</span>
+              <span class="moisture-current"></span>
+            </div>
+            <div class="entity-row moisture-max-row" style="display:none">
+              <span class="row-label">Skip if above (%)</span>
+              <input class="num-input" type="number" min="0" max="100" step="1"
+                     data-moisture-max data-sid="${sid}" />
+            </div>
+          </div>
+        </details>`;
     }
 
     _panelHTML(sid, type) {
@@ -651,6 +689,7 @@
       });
 
       this.shadowRoot.querySelectorAll('.num-input').forEach(el => {
+        if (el.dataset.moistureMax !== undefined) return; // handled separately below
         el.addEventListener('keydown', e => {
           if (e.key === 'Enter')  el.blur();
           if (e.key === 'Escape') {
@@ -664,6 +703,36 @@
           if (!isNaN(val)) {
             this._hass.callService('number', 'set_value', {
               entity_id: el.dataset.entity, value: val,
+            });
+          }
+        });
+      });
+
+      this.shadowRoot.querySelectorAll('[data-moisture-select]').forEach(el => {
+        el.addEventListener('change', () => {
+          this._hass.callService(DOMAIN, 'update_station', {
+            station_id: el.dataset.sid,
+            moisture_sensor: el.value,  // empty string clears the association
+          });
+        });
+      });
+
+      this.shadowRoot.querySelectorAll('[data-moisture-max]').forEach(el => {
+        el.addEventListener('keydown', e => {
+          if (e.key === 'Enter')  el.blur();
+          if (e.key === 'Escape') {
+            const stations = this._hass?.states[SENSOR]?.attributes?.stations || [];
+            const station  = stations.find(s => s.base_name === el.dataset.sid);
+            el.value = station?.moisture_max ?? '';
+            el.blur();
+          }
+        });
+        el.addEventListener('blur', () => {
+          const val = parseFloat(el.value);
+          if (!isNaN(val)) {
+            this._hass.callService(DOMAIN, 'update_station', {
+              station_id: el.dataset.sid,
+              moisture_max: val,
             });
           }
         });
@@ -686,9 +755,74 @@
         btn.classList.toggle('on', !!s && s.state === 'on');
       });
       this.shadowRoot.querySelectorAll('.num-input').forEach(el => {
+        if (el.dataset.moistureMax !== undefined) return; // handled below
         if (el === active) return;
         const s = hass.states[el.dataset.entity];
         if (s) el.value = s.state;
+      });
+
+      // Moisture sensor panels
+      const allStations = hass.states[SENSOR]?.attributes?.stations || [];
+      const moistureEntities = Object.values(hass.entities || {}).filter(e =>
+        Array.isArray(e.labels) &&
+        e.labels.includes('soil') &&
+        e.labels.includes('moisture')
+      );
+
+      this.shadowRoot.querySelectorAll('[data-moisture-select]').forEach(select => {
+        const sid          = select.dataset.sid;
+        const station      = allStations.find(s => s.base_name === sid);
+        const currentValue = station?.moisture_sensor || '';
+
+        // Rebuild options: keep "None" first, then one per moisture entity
+        const existingValues = new Set(
+          Array.from(select.options).map(o => o.value).filter(v => v)
+        );
+        const targetValues = new Set(moistureEntities.map(e => e.entity_id));
+
+        for (const e of moistureEntities) {
+          if (!existingValues.has(e.entity_id)) {
+            const opt       = document.createElement('option');
+            opt.value       = e.entity_id;
+            opt.textContent = e.name ||
+              hass.states[e.entity_id]?.attributes?.friendly_name ||
+              e.entity_id;
+            select.appendChild(opt);
+          }
+        }
+        for (const opt of Array.from(select.options)) {
+          if (opt.value && !targetValues.has(opt.value)) opt.remove();
+        }
+
+        if (select !== active) select.value = currentValue;
+
+        // Show/hide value and max rows based on whether a sensor is selected
+        const card      = select.closest('.card');
+        const valueRow  = card.querySelector('.moisture-value-row');
+        const maxRow    = card.querySelector('.moisture-max-row');
+        const reading   = card.querySelector('.moisture-current');
+        const maxInput  = card.querySelector('[data-moisture-max]');
+
+        const hasSensor = !!currentValue;
+        valueRow.style.display = hasSensor ? '' : 'none';
+        maxRow.style.display   = hasSensor ? '' : 'none';
+
+        if (hasSensor && reading) {
+          const sensorState = hass.states[currentValue];
+          const raw         = sensorState?.state;
+          const unit        = sensorState?.attributes?.unit_of_measurement || '%';
+          const moistureMax = station?.moisture_max;
+          const isValid     = raw && raw !== 'unavailable' && raw !== 'unknown';
+          const isOverMax   = isValid && moistureMax != null && parseFloat(raw) > parseFloat(moistureMax);
+
+          reading.textContent = isValid ? `${raw} ${unit}` : '—';
+          reading.classList.toggle('overmax', isOverMax);
+        }
+
+        if (hasSensor && maxInput && maxInput !== active) {
+          const moistureMax = station?.moisture_max;
+          maxInput.value = moistureMax != null ? moistureMax : '';
+        }
       });
     }
 

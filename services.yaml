@@ -65,6 +65,21 @@ update_station:
       required: false
       selector:
         boolean:
+    moisture_sensor:
+      name: Moisture Sensor Entity ID
+      description: Entity ID of a soil moisture sensor. Pass an empty string to clear the association.
+      required: false
+      selector:
+        text:
+    moisture_max:
+      name: Max Moisture (%)
+      description: If the moisture sensor reading exceeds this value the station is skipped (treated as Off).
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
 
 remove_station:
   name: Remove Station
