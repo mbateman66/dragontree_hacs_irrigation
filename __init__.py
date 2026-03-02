@@ -81,28 +81,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    _register_services(hass, coordinator)
+    try:
+        _register_services(hass, coordinator)
 
-    # Register the Lovelace card JS in lovelace_resources (Lovelace waits for these before rendering)
-    await _ensure_lovelace_resource(hass)
+        # Register the Lovelace card JS in lovelace_resources (Lovelace waits for these before rendering)
+        await _ensure_lovelace_resource(hass)
 
-    # Register the Irrigation dashboard in the HA sidebar
-    _register_dashboard(hass)
+        # Register the Irrigation dashboard in the HA sidebar
+        _register_dashboard(hass)
+    except Exception:
+        # If post-platform setup fails, tear down the platforms we already set up
+        # so that a subsequent reload doesn't hit "already been setup" errors.
+        await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+        raise
 
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    coordinator: IrrigationCoordinator = hass.data[DOMAIN][entry.entry_id]
-    coordinator.cleanup()
+    coordinator: IrrigationCoordinator | None = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if coordinator:
+        coordinator.cleanup()
 
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
-        hass.data[DOMAIN].pop(entry.entry_id)
+        hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
 
     # Remove services if no more entries
-    if not hass.data[DOMAIN]:
+    if not hass.data.get(DOMAIN):
         for service in [
             SERVICE_ADD_STATION,
             SERVICE_UPDATE_STATION,
