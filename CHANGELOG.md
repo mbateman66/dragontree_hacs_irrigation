@@ -4,6 +4,14 @@ All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.0.3] - 2026-03-24
+
+### Fixed
+- If a station was running when Home Assistant restarted, the integration now
+  detects it at startup and resumes the queue from that point instead of
+  treating the run as finished. The remaining stations continue in order once
+  the in-progress station completes.
+
 ## [1.0.2] - 2026-03-02
 
 ### Added

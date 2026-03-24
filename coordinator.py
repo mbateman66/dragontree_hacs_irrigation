@@ -14,6 +14,7 @@ from homeassistant.helpers.device_registry import DeviceEntryType
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_change
+from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
@@ -155,6 +156,12 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         self._setup_os_listeners()
         self._setup_running_listeners()
         self._setup_moisture_listeners()
+
+        @callback
+        def _schedule_recovery(_hass: HomeAssistant) -> None:
+            self.hass.async_create_task(self._recover_running_station())
+
+        async_at_started(self.hass, _schedule_recovery)
 
     async def _merge_discover_stations(self) -> None:
         """Scan OpenSprinkler entity registry and add any stations not yet tracked.
@@ -492,6 +499,63 @@ class IrrigationCoordinator(DataUpdateCoordinator):
     # Queue execution
     # ------------------------------------------------------------------
 
+    async def _recover_running_station(self) -> None:
+        """Detect a station that was running when HA restarted and resume the queue.
+
+        Called once after HA finishes starting so that all OpenSprinkler binary
+        sensors have their current states populated.  If a station's binary sensor
+        is already 'on', we mark prior stations in that queue as complete, set the
+        running station's status to RUNNING, and resume the queue task from there.
+        """
+        if self._runtime.get("running_queue"):
+            return
+        if self._queue_task and not self._queue_task.done():
+            return
+
+        today_str = date.today().isoformat()
+        today_sched = next((d for d in self._day_schedules if d["date"] == today_str), None)
+        if not today_sched:
+            return
+
+        for queue_name in (QUEUE_AM, QUEUE_PM):
+            queue = today_sched["queues"].get(queue_name, {})
+            stations = queue.get("stations", [])
+
+            for idx, station_entry in enumerate(stations):
+                if station_entry["status"] in (STATUS_CANCELLED, STATUS_COMPLETE):
+                    continue
+
+                station = self._get_station(station_entry["station_id"])
+                if not station:
+                    continue
+
+                bs_id = f"binary_sensor.{station['base_name']}_station_running"
+                bs_state = self.hass.states.get(bs_id)
+                if not bs_state or bs_state.state != "on":
+                    continue
+
+                _LOGGER.info(
+                    "Dragontree Irrigation: resuming %s queue after restart — %s is still running",
+                    queue_name,
+                    station["base_name"],
+                )
+
+                # Mark all scheduled stations before this one as complete.
+                for prior in stations[:idx]:
+                    if prior["status"] == STATUS_SCHEDULED:
+                        prior["status"] = STATUS_COMPLETE
+
+                station_entry["status"] = STATUS_RUNNING
+                self._runtime["running_queue"] = queue_name
+                self._runtime["current_station_id"] = station["id"]
+                self._recalculate_queue_end_time(queue_name)
+                self.async_set_updated_data(self._build_data())
+
+                self._queue_task = self.hass.async_create_task(
+                    self._run_queue(queue_name, stations)
+                )
+                return
+
     async def _start_queue(self, queue_name: str) -> None:
         if self._runtime.get("running_queue"):
             _LOGGER.warning("Queue already running: %s", self._runtime["running_queue"])
@@ -546,25 +610,28 @@ class IrrigationCoordinator(DataUpdateCoordinator):
                     station_entry["status"] = STATUS_CANCELLED
                     continue
 
+                already_running = station_entry["status"] == STATUS_RUNNING
                 station_entry["status"] = STATUS_RUNNING
                 self._runtime["current_station_id"] = station["id"]
                 self.async_set_updated_data(self._build_data())
 
                 duration = station_entry["duration"]
-                entity_id = f"switch.{station['base_name']}_station_enabled"
-                try:
-                    await self.hass.services.async_call(
-                        OPENSPRINKLER_DOMAIN,
-                        OS_SERVICE_RUN_STATION,
-                        {"run_seconds": duration},
-                        target={"entity_id": entity_id},
-                        blocking=False,
-                    )
-                except Exception as err:
-                    _LOGGER.error("Failed to start %s: %s", station["base_name"], err)
-                    station_entry["status"] = STATUS_CANCELLED
-                    self._runtime["current_station_id"] = None
-                    continue
+
+                if not already_running:
+                    entity_id = f"switch.{station['base_name']}_station_enabled"
+                    try:
+                        await self.hass.services.async_call(
+                            OPENSPRINKLER_DOMAIN,
+                            OS_SERVICE_RUN_STATION,
+                            {"run_seconds": duration},
+                            target={"entity_id": entity_id},
+                            blocking=False,
+                        )
+                    except Exception as err:
+                        _LOGGER.error("Failed to start %s: %s", station["base_name"], err)
+                        station_entry["status"] = STATUS_CANCELLED
+                        self._runtime["current_station_id"] = None
+                        continue
 
                 await self._wait_for_station(station["base_name"], duration + 60)
 
