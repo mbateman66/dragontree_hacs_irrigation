@@ -1039,9 +1039,15 @@
       margin-top: 10px; padding: 6px 16px; font-size: 0.82em; cursor: pointer;
       border: 1px solid var(--primary-color, #03a9f4); border-radius: 6px;
       background: var(--primary-color, #03a9f4); color: white;
-      transition: opacity 0.15s;
+      transition: opacity 0.15s, background 0.15s, border-color 0.15s, color 0.15s;
     }
-    .save-btn:hover { opacity: 0.85; }
+    .save-btn:hover:not(:disabled) { opacity: 0.85; }
+    .save-btn:disabled {
+      cursor: default;
+      background: var(--secondary-background-color, #f5f5f5);
+      border-color: var(--divider-color, #e0e0e0);
+      color: var(--secondary-text-color);
+    }
 
     /* ── station grid ── */
     .grid {
@@ -1152,7 +1158,7 @@
     .no-runs { font-size: 0.78em; color: var(--secondary-text-color); font-style: italic; text-align: center; padding: 8px 0; }
 
     /* ── disabled overlay ── */
-    .scard.disabled .scard-body { opacity: 0.4; pointer-events: none; }
+    .scard.disabled [data-enabled-only] { opacity: 0.4; pointer-events: none; }
     .scard.disabled .chart-wrap { display: none; }
     .scard.disabled .progress-wrap { display: none; }
   `;
@@ -1220,6 +1226,8 @@
     _buildGlobalConfig() {
       const body = this.shadowRoot.getElementById('cfgBody');
       if (!body) return;
+      this._savedFormState = null;  // null = not yet initialised from HA
+
       body.innerHTML = `
         <div class="cfg-row">
           <span class="cfg-label">Flow Sensor</span>
@@ -1247,20 +1255,53 @@
           <input class="cfg-input cfg-num" id="cfgInterval" type="number" min="5" max="60" step="5" />
           <span style="font-size:0.82em">s</span>
         </div>
-        <button class="save-btn" id="cfgSave">Save Configuration</button>`;
+        <button class="save-btn" id="cfgSave" disabled>Save Configuration</button>`;
+
+      // Enable save button whenever a field changes
+      ['cfgSensor', 'cfgThreshold', 'cfgMinRuns', 'cfgInterval'].forEach(id => {
+        const el = this.shadowRoot.getElementById(id);
+        el.addEventListener('change', () => this._updateSaveButton());
+        el.addEventListener('input',  () => this._updateSaveButton());
+      });
 
       this.shadowRoot.getElementById('cfgSave').addEventListener('click', () => {
-        const sensorVal  = this.shadowRoot.getElementById('cfgSensor').value;
-        const threshold  = parseFloat(this.shadowRoot.getElementById('cfgThreshold').value);
-        const minRuns    = parseInt(this.shadowRoot.getElementById('cfgMinRuns').value, 10);
-        const interval   = parseInt(this.shadowRoot.getElementById('cfgInterval').value, 10);
+        const sensorVal = this.shadowRoot.getElementById('cfgSensor').value;
+        const threshold = parseFloat(this.shadowRoot.getElementById('cfgThreshold').value);
+        const minRuns   = parseInt(this.shadowRoot.getElementById('cfgMinRuns').value, 10);
+        const interval  = parseInt(this.shadowRoot.getElementById('cfgInterval').value, 10);
         const data = {};
-        if (sensorVal !== undefined) data.flow_sensor_entity  = sensorVal;
+        if (sensorVal !== undefined) data.flow_sensor_entity   = sensorVal;
         if (!isNaN(threshold))       data.flow_alert_threshold = threshold / 100;
         if (!isNaN(minRuns))         data.flow_min_runs        = minRuns;
         if (!isNaN(interval))        data.flow_sample_interval = interval;
         this._hass.callService(DOMAIN, 'update_flow_config', data);
+        // Optimistically commit — HA will confirm via the next hass update
+        this._commitFormState();
+        this._updateSaveButton();
       });
+    }
+
+    _readFormState() {
+      return {
+        sensor:    this.shadowRoot.getElementById('cfgSensor')?.value    ?? '',
+        threshold: this.shadowRoot.getElementById('cfgThreshold')?.value ?? '',
+        minRuns:   this.shadowRoot.getElementById('cfgMinRuns')?.value   ?? '',
+        interval:  this.shadowRoot.getElementById('cfgInterval')?.value  ?? '',
+      };
+    }
+
+    _commitFormState() {
+      this._savedFormState = this._readFormState();
+    }
+
+    _updateSaveButton() {
+      const btn = this.shadowRoot.getElementById('cfgSave');
+      if (!btn) return;
+      if (!this._savedFormState) { btn.disabled = true; return; }
+      const cur   = this._readFormState();
+      const saved = this._savedFormState;
+      const dirty = Object.keys(cur).some(k => cur[k] !== saved[k]);
+      btn.disabled = !dirty;
     }
 
     // -----------------------------------------------------------------------
@@ -1376,6 +1417,13 @@
       if (intervalEl && document.activeElement !== intervalEl) {
         intervalEl.value = flowCfg.flow_sample_interval ?? 10;
       }
+      // First load: snapshot form state so the button starts disabled.
+      // Subsequent loads after HA confirms a save: re-snapshot so the button
+      // disables again even if the user had made further edits in the meantime.
+      if (!this._savedFormState) {
+        this._commitFormState();
+      }
+      this._updateSaveButton();
 
       // ── per-station cards ──
       for (const station of stations) {
