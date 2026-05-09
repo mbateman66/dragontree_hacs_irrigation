@@ -10,7 +10,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DEFAULT_LOOKAHEAD_DAYS, DOMAIN, SIGNAL_STATIONS_UPDATED
+from .const import DEFAULT_FLOW_FILL_TIME, DEFAULT_LOOKAHEAD_DAYS, DOMAIN, SIGNAL_STATIONS_UPDATED
 from .coordinator import CONTROLLER_DEVICE_INFO, IrrigationCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -62,6 +62,8 @@ def _station_number_specs(
         uid_dur = f"{DOMAIN}_{station_id}_{stype}_duration"
         specs.append((uid_wi, ScheduleWeekIntervalNumber(coordinator, station_id, stype)))
         specs.append((uid_dur, ScheduleDurationNumber(coordinator, station_id, stype)))
+    uid_fill = f"{DOMAIN}_{station_id}_flow_fill_time"
+    specs.append((uid_fill, StationFlowFillTimeNumber(coordinator, station_id)))
     return specs
 
 
@@ -190,4 +192,48 @@ class ScheduleDurationNumber(CoordinatorEntity, NumberEntity):
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.async_update_station_schedule(
             self._station_id, self._schedule_type, {"duration": int(value * 60)}
+        )
+
+
+# ---------------------------------------------------------------------------
+# Per-station flow: fill time
+# ---------------------------------------------------------------------------
+
+class StationFlowFillTimeNumber(CoordinatorEntity, NumberEntity):
+    """Seconds to ignore at the start of a run before recording steady-state flow.
+
+    Long pipe runs can take 2-3 minutes to fill before flow settles. Set this
+    to the longest expected fill time for this station.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:timer-sand"
+    _attr_native_min_value = 0
+    _attr_native_max_value = 300
+    _attr_native_step = 10
+    _attr_native_unit_of_measurement = "s"
+    _attr_mode = NumberMode.BOX
+
+    def __init__(self, coordinator: IrrigationCoordinator, station_id: str) -> None:
+        super().__init__(coordinator)
+        self._station_id = station_id
+        self._attr_unique_id = f"{DOMAIN}_{station_id}_flow_fill_time"
+        self._attr_device_info = CONTROLLER_DEVICE_INFO
+
+    @property
+    def name(self) -> str:
+        return f"{self._station_id} Flow Fill Time"
+
+    def _get_station(self) -> dict:
+        return next(
+            (s for s in self.coordinator.stations if s["id"] == self._station_id), {}
+        )
+
+    @property
+    def native_value(self) -> float:
+        return float(self._get_station().get("flow_fill_time", DEFAULT_FLOW_FILL_TIME))
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_update_station(
+            self._station_id, {"flow_fill_time": int(value)}
         )

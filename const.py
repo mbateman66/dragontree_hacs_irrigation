@@ -46,10 +46,25 @@ OS_SERVICE_RUN_STATION = "run_station"
 OS_SERVICE_STOP = "stop"
 
 # HA platforms this component sets up
-PLATFORMS = ["binary_sensor", "sensor", "switch", "select", "number", "time", "text"]
+PLATFORMS = ["binary_sensor", "button", "sensor", "switch", "select", "number", "time", "text"]
 
 # Dispatcher signals
 SIGNAL_STATIONS_UPDATED = f"{DOMAIN}_stations_updated"
+
+# Flow monitoring defaults
+DEFAULT_FLOW_FILL_TIME = 120        # seconds to ignore at run start
+DEFAULT_FLOW_ALERT_THRESHOLD = 0.25  # 25% deviation triggers anomaly
+DEFAULT_FLOW_MIN_RUNS = 5           # runs needed before alerting
+DEFAULT_FLOW_SAMPLE_INTERVAL = 10   # seconds between Droplet readings
+
+# Flow status values
+FLOW_STATUS_LEARNING = "learning"
+FLOW_STATUS_NORMAL = "normal"
+FLOW_STATUS_HIGH = "high"
+FLOW_STATUS_LOW = "low"
+FLOW_STATUS_MONITORING = "monitoring"
+FLOW_STATUS_IDLE = "idle"
+FLOW_STATUS_UNKNOWN = "unknown"
 
 # Services
 SERVICE_START_STATION = "start_station"
@@ -60,3 +75,5 @@ SERVICE_REMOVE_STATION = "remove_station"
 SERVICE_REORDER_STATIONS = "reorder_stations"
 SERVICE_UPDATE_SCHEDULE = "update_schedule"
 SERVICE_MOVE_STATION = "move_station"
+SERVICE_RESET_FLOW_PROFILE = "reset_flow_profile"
+SERVICE_UPDATE_FLOW_CONFIG = "update_flow_config"

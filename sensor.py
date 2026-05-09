@@ -15,7 +15,19 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, SIGNAL_STATIONS_UPDATED, STATUS_MANUAL, STATUS_RUNNING
+from .const import (
+    DOMAIN,
+    FLOW_STATUS_HIGH,
+    FLOW_STATUS_IDLE,
+    FLOW_STATUS_LEARNING,
+    FLOW_STATUS_LOW,
+    FLOW_STATUS_MONITORING,
+    FLOW_STATUS_NORMAL,
+    FLOW_STATUS_UNKNOWN,
+    SIGNAL_STATIONS_UPDATED,
+    STATUS_MANUAL,
+    STATUS_RUNNING,
+)
 from .coordinator import CONTROLLER_DEVICE_INFO, IrrigationCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -43,7 +55,13 @@ async def async_setup_entry(
         existing_ids = {e.unique_id for e in hass.data[DOMAIN].get("sensor_entities", [])}
         new_entities = []
         for station in coordinator.stations:
-            for cls in (StationStatusSensor, StationTimeRemainingSensor, StationLastRunSensor):
+            for cls in (
+                StationStatusSensor,
+                StationTimeRemainingSensor,
+                StationLastRunSensor,
+                StationFlowStatusSensor,
+                StationFlowBaselineSensor,
+            ):
                 uid = f"{DOMAIN}_{station['id']}_{cls.__name__.lower()}"
                 if uid not in existing_ids:
                     new_entities.append(cls(coordinator, station["id"]))
@@ -61,6 +79,8 @@ def _station_sensors(coordinator: IrrigationCoordinator, station: dict) -> list:
         StationStatusSensor(coordinator, sid),
         StationTimeRemainingSensor(coordinator, sid),
         StationLastRunSensor(coordinator, sid),
+        StationFlowStatusSensor(coordinator, sid),
+        StationFlowBaselineSensor(coordinator, sid),
     ]
 
 
@@ -273,3 +293,71 @@ class StationLastRunSensor(_StationBaseSensor):
         if not station:
             return "unknown"
         return station.get("last_run") or "never"
+
+
+_FLOW_STATUS_ICONS = {
+    FLOW_STATUS_LEARNING: "mdi:school",
+    FLOW_STATUS_NORMAL: "mdi:check-circle",
+    FLOW_STATUS_HIGH: "mdi:water-plus",
+    FLOW_STATUS_LOW: "mdi:water-minus",
+    FLOW_STATUS_MONITORING: "mdi:eye",
+    FLOW_STATUS_IDLE: "mdi:water-off",
+    FLOW_STATUS_UNKNOWN: "mdi:help-circle",
+}
+
+
+class StationFlowStatusSensor(_StationBaseSensor):
+    """Flow monitoring status for a station: learning / normal / high / low / etc."""
+
+    def __init__(self, coordinator: IrrigationCoordinator, station_id: str) -> None:
+        super().__init__(coordinator, station_id)
+        self._attr_unique_id = f"{DOMAIN}_{station_id}_flow_status"
+
+    @property
+    def name(self) -> str:
+        return f"{self._station_id} Flow Status"
+
+    @property
+    def icon(self) -> str:
+        return _FLOW_STATUS_ICONS.get(self.native_value or "", "mdi:water")
+
+    @property
+    def native_value(self) -> str:
+        station = self._get_station()
+        if not station or not station.get("flow_monitoring"):
+            return FLOW_STATUS_UNKNOWN
+        return self.coordinator.flow_monitor.get_station_flow_state(
+            self._station_id
+        ).get("status", FLOW_STATUS_UNKNOWN)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        state = self.coordinator.flow_monitor.get_station_flow_state(self._station_id)
+        return {
+            "run_count": state.get("run_count", 0),
+            "last_anomaly": state.get("last_anomaly", False),
+        }
+
+
+class StationFlowBaselineSensor(_StationBaseSensor):
+    """Learned baseline flow rate (GPM) for a station."""
+
+    _attr_native_unit_of_measurement = "gal/min"
+    _attr_icon = "mdi:gauge"
+
+    def __init__(self, coordinator: IrrigationCoordinator, station_id: str) -> None:
+        super().__init__(coordinator, station_id)
+        self._attr_unique_id = f"{DOMAIN}_{station_id}_flow_baseline"
+
+    @property
+    def name(self) -> str:
+        return f"{self._station_id} Flow Baseline"
+
+    @property
+    def native_value(self) -> float | None:
+        station = self._get_station()
+        if not station or not station.get("flow_monitoring"):
+            return None
+        return self.coordinator.flow_monitor.get_station_flow_state(
+            self._station_id
+        ).get("baseline_median")
