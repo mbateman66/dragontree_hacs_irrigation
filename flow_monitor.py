@@ -185,6 +185,7 @@ class FlowMonitor:
                 "baseline_median": None,
                 "last_anomaly": False,
                 "run_count": 0,
+                "recent_runs": [],
             },
         )
         _LOGGER.info("Flow profile reset for station %s", station_id)
@@ -210,6 +211,7 @@ class FlowMonitor:
             "baseline_median": baseline_median,
             "last_anomaly": False,
             "run_count": run_count,
+            "recent_runs": [round(v, 3) for v in reversed(prior[:10])],
         }
 
     # ------------------------------------------------------------------
@@ -343,6 +345,7 @@ class FlowMonitor:
                     "run_count": new_count,
                     "baseline_median": round(statistics.median(all_medians), 3),
                     "last_anomaly": False,
+                    "recent_runs": [round(v, 3) for v in all_medians[-10:]],
                 },
             )
             _LOGGER.info(
@@ -377,6 +380,7 @@ class FlowMonitor:
         else:
             status = "normal"
 
+        all_medians = prior_medians + [run_median]
         self._update_station_state(
             station_id,
             {
@@ -384,6 +388,7 @@ class FlowMonitor:
                 "run_count": run_count + 1,
                 "baseline_median": round(baseline_median, 3),
                 "last_anomaly": anomaly,
+                "recent_runs": [round(v, 3) for v in all_medians[-10:]],
             },
         )
 

@@ -146,6 +146,7 @@ class IrrigationScheduleSensor(CoordinatorEntity, SensorEntity):
         #   - day_schedules: _run_queue mutates station_entry["status"] and
         #     _recalculate_queue_end_time mutates queue["end_time"] in-place
         #     without calling _regenerate_schedules (which would replace the list).
+        cfg = self.coordinator.global_config
         return {
             "day_schedules": [
                 {
@@ -161,6 +162,12 @@ class IrrigationScheduleSensor(CoordinatorEntity, SensorEntity):
                 for day in self.coordinator.day_schedules
             ],
             "stations": [dict(s) for s in self.coordinator.stations],
+            "flow_config": {
+                "flow_sensor_entity": cfg.get("flow_sensor_entity"),
+                "flow_alert_threshold": cfg.get("flow_alert_threshold", 0.25),
+                "flow_min_runs": cfg.get("flow_min_runs", 5),
+                "flow_sample_interval": cfg.get("flow_sample_interval", 10),
+            },
         }
 
 
@@ -333,9 +340,13 @@ class StationFlowStatusSensor(_StationBaseSensor):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         state = self.coordinator.flow_monitor.get_station_flow_state(self._station_id)
+        cfg = self.coordinator.global_config
         return {
             "run_count": state.get("run_count", 0),
             "last_anomaly": state.get("last_anomaly", False),
+            "recent_runs": state.get("recent_runs", []),
+            "min_runs": cfg.get("flow_min_runs", 5),
+            "alert_threshold": cfg.get("flow_alert_threshold", 0.25),
         }
 
 
