@@ -1271,6 +1271,7 @@
       const body = this.shadowRoot.getElementById('cfgBody');
       if (!body) return;
       this._savedFormState = null;  // null = not yet initialised from HA
+      this._sensorDirty = false;
 
       body.innerHTML = `
         <div class="cfg-row">
@@ -1304,7 +1305,10 @@
       // Enable save button whenever a field changes
       ['cfgSensor', 'cfgThreshold', 'cfgMinRuns', 'cfgInterval'].forEach(id => {
         const el = this.shadowRoot.getElementById(id);
-        el.addEventListener('change', () => this._updateSaveButton());
+        el.addEventListener('change', () => {
+          if (id === 'cfgSensor') this._sensorDirty = true;
+          this._updateSaveButton();
+        });
         el.addEventListener('input',  () => this._updateSaveButton());
       });
 
@@ -1493,7 +1497,15 @@
       // ── global config inputs ──
       const sensorSelect = this.shadowRoot.getElementById('cfgSensor');
       if (sensorSelect) {
-        this._populateSensorOptions(hass, sensorSelect, flowCfg.flow_sensor_entity);
+        // Clear the dirty flag once HA confirms the value the user saved
+        if (this._sensorDirty && (flowCfg.flow_sensor_entity || '') === sensorSelect.value) {
+          this._sensorDirty = false;
+        }
+        this._populateSensorOptions(
+          hass,
+          sensorSelect,
+          this._sensorDirty ? sensorSelect.value : flowCfg.flow_sensor_entity
+        );
       }
       const thresholdEl = this.shadowRoot.getElementById('cfgThreshold');
       if (thresholdEl && document.activeElement !== thresholdEl) {
