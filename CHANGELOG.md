@@ -4,6 +4,13 @@ All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] - 2026-05-16
+
+### Fixed
+- Enabling flow monitoring on a station now immediately loads its run history from
+  the database. Previously the history bars were empty until the user toggled
+  monitoring off and back on.
+
 ## [1.1.0] - 2026-05-16
 
 ### Added

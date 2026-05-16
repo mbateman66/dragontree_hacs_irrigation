@@ -773,6 +773,8 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         # Re-register flow listeners if monitoring enablement changed
         if "flow_monitoring" in data:
             self._flow_monitor.setup(self._stations)
+            if data.get("flow_monitoring"):
+                await self._flow_monitor.async_load_station_state(station_id)
         await self._save()
         self.async_set_updated_data(self._build_data())
 
