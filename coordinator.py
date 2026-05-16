@@ -805,6 +805,12 @@ class IrrigationCoordinator(DataUpdateCoordinator):
     async def async_reset_flow_profile(self, station_id: str) -> None:
         await self._flow_monitor.async_reset_profile(station_id)
 
+    async def async_discard_flow_run(self, station_id: str, run_id: str) -> None:
+        await self._flow_monitor.async_discard_run(station_id, run_id)
+
+    async def async_discard_flow_runs_before(self, station_id: str, run_id: str) -> None:
+        await self._flow_monitor.async_discard_runs_before(station_id, run_id)
+
     async def async_update_flow_config(self, updates: dict) -> None:
         """Update global flow monitoring configuration."""
         allowed = {

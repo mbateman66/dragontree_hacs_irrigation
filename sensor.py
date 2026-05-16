@@ -345,6 +345,7 @@ class StationFlowStatusSensor(_StationBaseSensor):
             "run_count": state.get("run_count", 0),
             "last_anomaly": state.get("last_anomaly", False),
             "recent_runs": state.get("recent_runs", []),
+            "recent_run_details": state.get("recent_run_details", []),
             "min_runs": cfg.get("flow_min_runs", 5),
             "alert_threshold": cfg.get("flow_alert_threshold", 0.25),
         }

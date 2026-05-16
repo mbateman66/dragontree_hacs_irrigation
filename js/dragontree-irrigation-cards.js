@@ -1154,8 +1154,52 @@
     }
 
     /* ── chart area ── */
-    .chart-wrap { padding: 8px 16px 4px; }
+    .chart-wrap { padding: 8px 16px 4px; cursor: default; }
     .no-runs { font-size: 0.78em; color: var(--secondary-text-color); font-style: italic; text-align: center; padding: 8px 0; }
+    .run-bar { cursor: pointer; }
+    .run-bar:hover { opacity: 1 !important; filter: brightness(1.15); }
+
+    /* ── run action panel ── */
+    .run-panel {
+      margin: 0 16px 8px; padding: 8px 12px;
+      background: var(--secondary-background-color, #f5f5f5);
+      border-radius: 10px; border: 1px solid var(--divider-color, #e0e0e0);
+    }
+    .run-panel-date {
+      font-size: 0.78em; color: var(--secondary-text-color); margin-bottom: 5px;
+    }
+    .run-panel-grid {
+      display: grid; grid-template-columns: auto 1fr;
+      gap: 2px 10px; margin-bottom: 8px;
+    }
+    .run-detail-label {
+      font-size: 0.75em; color: var(--secondary-text-color); white-space: nowrap;
+      display: flex; align-items: center;
+    }
+    .run-detail-val {
+      font-size: 0.78em; color: var(--primary-text-color); font-family: monospace;
+      display: flex; align-items: center;
+    }
+    .run-deviation-high { color: #ef5350; }
+    .run-deviation-low  { color: #ffa726; }
+    .run-panel-btns { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; border-top: 1px solid var(--divider-color, #e0e0e0); padding-top: 7px; }
+    .run-btn {
+      padding: 4px 10px; font-size: 0.75em; cursor: pointer; border-radius: 6px;
+      border: 1px solid transparent; font-weight: 500; white-space: nowrap;
+      background: transparent;
+    }
+    .run-btn.run-discard {
+      background: var(--error-color, #db4437); color: white;
+      border-color: var(--error-color, #db4437);
+    }
+    .run-btn.run-discard:hover { opacity: 0.85; }
+    .run-btn.run-before { color: #e65100; border-color: #e65100; }
+    .run-btn.run-before:hover { background: #fff3e0; }
+    .run-btn.run-cancel {
+      color: var(--secondary-text-color); border-color: var(--divider-color, #e0e0e0);
+      margin-left: auto;
+    }
+    .run-btn.run-cancel:hover { border-color: var(--secondary-text-color); }
 
     /* ── disabled overlay ── */
     .scard.disabled [data-enabled-only] { opacity: 0.4; pointer-events: none; }
@@ -1333,6 +1377,24 @@
           <div class="progress-track"><div class="progress-fill" data-progress-fill style="width:0%"></div></div>
         </div>
         <div class="chart-wrap" data-chart></div>
+        <div class="run-panel" data-run-panel style="display:none">
+          <div class="run-panel-date" data-run-date></div>
+          <div class="run-panel-grid">
+            <span class="run-detail-label">Flow</span>
+            <span class="run-detail-val" data-run-flow></span>
+            <span class="run-detail-label">Range</span>
+            <span class="run-detail-val" data-run-range></span>
+            <span class="run-detail-label">Duration</span>
+            <span class="run-detail-val" data-run-duration></span>
+            <span class="run-detail-label" data-run-dev-label style="display:none">vs. baseline</span>
+            <span class="run-detail-val" data-run-deviation style="display:none"></span>
+          </div>
+          <div class="run-panel-btns">
+            <button class="run-btn run-discard" data-discard-btn>Discard run</button>
+            <button class="run-btn run-before" data-before-btn>Discard earlier runs</button>
+            <button class="run-btn run-cancel" data-cancel-btn>Cancel</button>
+          </div>
+        </div>
         <div class="scard-body">
           <div class="row">
             <span class="row-label">Flow Monitoring</span>
@@ -1393,6 +1455,34 @@
         });
       });
 
+      // Chart bar click — event delegation so it survives innerHTML rebuilds
+      el.querySelector('[data-chart]').addEventListener('click', e => {
+        const bar = e.target.closest('[data-run-idx]');
+        if (!bar) return;
+        const idx = parseInt(bar.dataset.runIdx, 10);
+        this._showRunPanel(el, sid, idx);
+      });
+
+      // Run panel buttons
+      const runPanel = el.querySelector('[data-run-panel]');
+      el.querySelector('[data-discard-btn]').addEventListener('click', () => {
+        const { runId, stationId } = runPanel.dataset;
+        if (runId && stationId) {
+          this._hass.callService(DOMAIN, 'discard_flow_run', { station_id: stationId, run_id: runId });
+        }
+        this._hideRunPanel(el);
+      });
+      el.querySelector('[data-before-btn]').addEventListener('click', () => {
+        const { runId, stationId } = runPanel.dataset;
+        if (runId && stationId) {
+          this._hass.callService(DOMAIN, 'discard_flow_runs_before', { station_id: stationId, run_id: runId });
+        }
+        this._hideRunPanel(el);
+      });
+      el.querySelector('[data-cancel-btn]').addEventListener('click', () => {
+        this._hideRunPanel(el);
+      });
+
       return el;
     }
 
@@ -1443,9 +1533,12 @@
         const minRuns      = statusState?.attributes?.min_runs ?? flowCfg.flow_min_runs ?? 5;
         const alertThr     = statusState?.attributes?.alert_threshold ?? flowCfg.flow_alert_threshold ?? 0.25;
         const recentRuns   = statusState?.attributes?.recent_runs || [];
+        const runDetails   = statusState?.attributes?.recent_run_details || [];
         const baseline     = baselineState?.state && baselineState.state !== 'unavailable'
                              ? parseFloat(baselineState.state) : null;
         const isAnomaly    = anomalyState?.state === 'on';
+
+        card._runDetails = runDetails;
 
         // Card-level border
         card.classList.toggle('anomaly', isAnomaly);
@@ -1480,7 +1573,7 @@
         // Fill time (skip if currently editing)
         const fillInput = card.querySelector('[data-fill-input]');
         if (fillInput && !this._editingFill) {
-          fillInput.value = fillState?.state ?? 120;
+          fillInput.value = fillState?.state != null ? parseInt(fillState.state, 10) : 120;
         }
 
         // Show/hide enabled-only rows
@@ -1491,8 +1584,12 @@
         // Bar chart
         const chartWrap = card.querySelector('[data-chart]');
         chartWrap.innerHTML = isMonitoring
-          ? this._renderChart(recentRuns, baseline, alertThr)
+          ? this._renderChart(recentRuns, baseline, alertThr, runDetails)
           : '';
+        // Re-apply bar highlight if the action panel is open
+        if (card._selectedRunIdx != null) {
+          this._applyBarHighlight(card, card._selectedRunIdx);
+        }
       }
     }
 
@@ -1537,35 +1634,49 @@
     // -----------------------------------------------------------------------
     // SVG bar chart
     // -----------------------------------------------------------------------
-    _renderChart(recentRuns, baseline, alertThreshold) {
+    _renderChart(recentRuns, baseline, alertThreshold, runDetails) {
       if (!recentRuns || recentRuns.length === 0) {
         return '<div class="no-runs">No completed runs yet</div>';
       }
 
-      const W = 220, H = 64, PX = 8, PY = 6;
+      const W = 220, H = 80, PX = 8, PY_TOP = 14, PY_BOT = 6;
       const allVals = baseline !== null ? [...recentRuns, baseline] : [...recentRuns];
       const rawMax  = Math.max(...allVals);
-      const rawMin  = Math.min(...allVals);
-      const span    = rawMax - rawMin || rawMax * 0.1 || 1;
-      const maxV    = rawMax + span * 0.15;
-      const minV    = Math.max(0, rawMin - span * 0.15);
-      const range   = maxV - minV;
+      const minV    = 0;
+      const maxV    = rawMax * 1.15;
+      const range   = maxV;
 
       const n       = recentRuns.length;
       const barW    = Math.floor((W - PX * 2 - (n - 1) * 2) / n);
       const startX  = PX + Math.floor(((W - PX * 2) - (n * barW + (n - 1) * 2)) / 2);
+      const chartH  = H - PY_TOP - PY_BOT;
 
-      const toY = v => PY + (H - PY * 2) * (1 - (v - minV) / range);
+      const toY = v => PY_TOP + chartH * (1 - (v - minV) / range);
 
       const bars = recentRuns.map((v, i) => {
-        const x    = startX + i * (barW + 2);
-        const y    = toY(v);
-        const bH   = H - PY - y;
-        const dev  = baseline !== null ? Math.abs(v - baseline) / baseline : 0;
-        const color= baseline === null ? '#90a4ae'
-                   : dev > alertThreshold ? '#ef5350'
-                   : '#42a5f5';
-        return `<rect x="${x}" y="${y.toFixed(1)}" width="${barW}" height="${Math.max(1, bH).toFixed(1)}" rx="2" fill="${color}" opacity="0.85"/>`;
+        const x      = startX + i * (barW + 2);
+        const y      = toY(v);
+        const bH     = H - PY_BOT - y;
+        const dev    = baseline !== null ? Math.abs(v - baseline) / baseline : 0;
+        const color  = baseline === null ? '#90a4ae'
+                     : dev > alertThreshold ? '#ef5350'
+                     : '#42a5f5';
+        const cx     = x + barW / 2;
+        const labelY = Math.max(PY_TOP - 2, y - 2);
+
+        const detail  = runDetails && runDetails[i];
+        const tipDate = detail
+          ? new Date(detail.start_time).toLocaleString(undefined, {
+              month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+            })
+          : '';
+        const tip = tipDate ? `${tipDate} · ${v.toFixed(3)} GPM` : `${v.toFixed(3)} GPM`;
+
+        const valueLabel = n <= 8
+          ? `<text x="${cx.toFixed(1)}" y="${labelY.toFixed(1)}" font-size="8" fill="${color}" font-family="monospace" text-anchor="middle">${v.toFixed(2)}</text>`
+          : '';
+
+        return `<rect data-run-idx="${i}" x="${x}" y="${y.toFixed(1)}" width="${barW}" height="${Math.max(1, bH).toFixed(1)}" rx="2" fill="${color}" opacity="0.85"><title>${this._esc(tip)}</title></rect>${valueLabel}`;
       }).join('');
 
       const baseLine = baseline !== null
@@ -1576,14 +1687,104 @@
           })()
         : '';
 
-      const labels = baseline !== null
-        ? `<text x="${PX}" y="${H - 1}" font-size="8" fill="var(--secondary-text-color)" font-family="monospace">${minV.toFixed(2)}</text>
-           <text x="${W - PX}" y="${H - 1}" font-size="8" fill="var(--secondary-text-color)" font-family="monospace" text-anchor="end">${maxV.toFixed(2)}</text>`
-        : '';
-
       return `<svg width="${W}" height="${H}" style="display:block;margin:0 auto" viewBox="0 0 ${W} ${H}">
-        ${bars}${baseLine}${labels}
+        ${bars}${baseLine}
       </svg>`;
+    }
+
+    // -----------------------------------------------------------------------
+    // Run action panel
+    // -----------------------------------------------------------------------
+    _showRunPanel(card, sid, idx) {
+      const details = card._runDetails || [];
+      const run     = details[idx];
+      if (!run) return;
+
+      const panel = card.querySelector('[data-run-panel]');
+
+      // Date header
+      card.querySelector('[data-run-date]').textContent =
+        new Date(run.start_time).toLocaleString(undefined, {
+          weekday: 'short', month: 'short', day: 'numeric',
+          hour: '2-digit', minute: '2-digit',
+        });
+
+      // Flow
+      card.querySelector('[data-run-flow]').textContent = `${run.median.toFixed(3)} GPM`;
+
+      // Range (Q1–Q3)
+      const rangeEl = card.querySelector('[data-run-range]');
+      rangeEl.textContent = (run.q1 != null && run.q3 != null)
+        ? `${run.q1.toFixed(3)} – ${run.q3.toFixed(3)} GPM`
+        : `${run.median.toFixed(3)} GPM`;
+
+      // Duration
+      const durEl = card.querySelector('[data-run-duration]');
+      if (run.end_time) {
+        const secs = Math.round((new Date(run.end_time) - new Date(run.start_time)) / 1000);
+        const m = Math.floor(secs / 60), s = secs % 60;
+        durEl.textContent = m > 0 ? `${m} min ${s} sec` : `${s} sec`;
+      } else {
+        durEl.textContent = '—';
+      }
+
+      // Deviation from baseline (only when available)
+      const devLabel = card.querySelector('[data-run-dev-label]');
+      const devEl    = card.querySelector('[data-run-deviation]');
+      if (run.anomaly_score != null && run.baseline_median != null) {
+        const pct = (run.anomaly_score * 100).toFixed(1);
+        const high = run.median > run.baseline_median;
+        devEl.textContent  = `${high ? '↑' : '↓'} ${pct}% ${high ? 'above' : 'below'} baseline`;
+        devEl.className    = `run-detail-val ${high ? 'run-deviation-high' : 'run-deviation-low'}`;
+        devLabel.style.display = '';
+        devEl.style.display    = '';
+      } else {
+        devLabel.style.display = 'none';
+        devEl.style.display    = 'none';
+      }
+
+      // Hide "Discard earlier runs" when this is the oldest non-discarded run
+      card.querySelector('[data-before-btn]').style.display = idx === 0 ? 'none' : '';
+
+      card._selectedRunIdx = idx;
+      this._applyBarHighlight(card, idx);
+
+      panel.dataset.runId     = run.run_id;
+      panel.dataset.stationId = sid;
+      panel.style.display     = '';
+    }
+
+    _hideRunPanel(card) {
+      const panel = card.querySelector('[data-run-panel]');
+      if (panel) panel.style.display = 'none';
+      card._selectedRunIdx = null;
+      this._clearBarHighlight(card);
+    }
+
+    _applyBarHighlight(card, idx) {
+      card.querySelector('[data-chart]')
+        ?.querySelectorAll('[data-run-idx]')
+        .forEach(r => {
+          const selected = parseInt(r.dataset.runIdx, 10) === idx;
+          r.setAttribute('opacity', selected ? '1' : '0.35');
+          if (selected) {
+            r.setAttribute('stroke', 'rgba(255,255,255,0.85)');
+            r.setAttribute('stroke-width', '1.5');
+          } else {
+            r.removeAttribute('stroke');
+            r.removeAttribute('stroke-width');
+          }
+        });
+    }
+
+    _clearBarHighlight(card) {
+      card.querySelector('[data-chart]')
+        ?.querySelectorAll('[data-run-idx]')
+        .forEach(r => {
+          r.setAttribute('opacity', '0.85');
+          r.removeAttribute('stroke');
+          r.removeAttribute('stroke-width');
+        });
     }
 
     _esc(str) {

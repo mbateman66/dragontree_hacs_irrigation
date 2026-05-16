@@ -98,7 +98,10 @@ class FlowMonitor:
             if not station_id:
                 return
 
-            old_s = old_state.state if old_state else None
+            if old_state is None:
+                return  # ignore synthetic events during initial HA state load
+
+            old_s = old_state.state
             new_s = new_state.state
 
             if new_s == "on" and old_s != "on":
@@ -173,6 +176,7 @@ class FlowMonitor:
                 "baseline_median": None,
                 "last_anomaly": False,
                 "run_count": 0,
+                "recent_run_details": [],
             },
         )
 
@@ -186,13 +190,28 @@ class FlowMonitor:
                 "last_anomaly": False,
                 "run_count": 0,
                 "recent_runs": [],
+                "recent_run_details": [],
             },
         )
         _LOGGER.info("Flow profile reset for station %s", station_id)
 
+    async def async_discard_run(self, station_id: str, run_id: str) -> None:
+        """Mark a single run as discarded and refresh in-memory state from the DB."""
+        await self._db.discard_run(run_id)
+        await self.async_load_station_state(station_id)
+        self._coordinator.async_set_updated_data(self._coordinator._build_data())
+        _LOGGER.info("Flow run %s discarded for station %s", run_id, station_id)
+
+    async def async_discard_runs_before(self, station_id: str, run_id: str) -> None:
+        """Discard all runs older than run_id and refresh in-memory state."""
+        await self._db.discard_runs_before(station_id, run_id)
+        await self.async_load_station_state(station_id)
+        self._coordinator.async_set_updated_data(self._coordinator._build_data())
+        _LOGGER.info("Flow runs before %s discarded for station %s", run_id, station_id)
+
     async def async_load_station_state(self, station_id: str) -> None:
         """Populate in-memory state from the database on startup."""
-        prior = await self._db.get_baseline_runs(station_id)
+        prior, run_details = await self._db.get_station_startup_data(station_id)
         run_count = len(prior)
         min_runs = int(
             self._coordinator.global_config.get("flow_min_runs", 5)
@@ -212,6 +231,7 @@ class FlowMonitor:
             "last_anomaly": False,
             "run_count": run_count,
             "recent_runs": [round(v, 3) for v in reversed(prior[:10])],
+            "recent_run_details": list(reversed(run_details)),
         }
 
     # ------------------------------------------------------------------
@@ -333,11 +353,24 @@ class FlowMonitor:
         prior_medians = await self._db.get_baseline_runs(station_id)
         run_count = len(prior_medians)
 
-        if run_count < min_runs:
+        if run_count + 1 < min_runs:
             run_record["discarded"] = 0
             await self._db.save_run(run_record)
             new_count = run_count + 1
-            all_medians = prior_medians + [run_median]
+            all_medians = list(reversed(prior_medians)) + [run_median]
+            prior_details = self._station_state.get(station_id, {}).get("recent_run_details", [])
+            new_detail = {
+                "run_id": run_id,
+                "start_time": start_time.isoformat(),
+                "end_time": end_time.isoformat(),
+                "median": round(run_median, 3),
+                "q1": round(q1, 3) if q1 is not None else None,
+                "q3": round(q3, 3) if q3 is not None else None,
+                "steady_count": len(filtered),
+                "anomaly_score": None,
+                "baseline_median": None,
+            }
+            new_details = (prior_details + [new_detail])[-10:]
             self._update_station_state(
                 station_id,
                 {
@@ -346,6 +379,7 @@ class FlowMonitor:
                     "baseline_median": round(statistics.median(all_medians), 3),
                     "last_anomaly": False,
                     "recent_runs": [round(v, 3) for v in all_medians[-10:]],
+                    "recent_run_details": new_details,
                 },
             )
             _LOGGER.info(
@@ -380,7 +414,20 @@ class FlowMonitor:
         else:
             status = "normal"
 
-        all_medians = prior_medians + [run_median]
+        all_medians = list(reversed(prior_medians)) + [run_median]
+        prior_details = self._station_state.get(station_id, {}).get("recent_run_details", [])
+        new_detail = {
+            "run_id": run_id,
+            "start_time": start_time.isoformat(),
+            "end_time": end_time.isoformat(),
+            "median": round(run_median, 3),
+            "q1": round(q1, 3) if q1 is not None else None,
+            "q3": round(q3, 3) if q3 is not None else None,
+            "steady_count": len(filtered),
+            "anomaly_score": round(deviation, 4),
+            "baseline_median": round(baseline_median, 3),
+        }
+        new_details = (prior_details + [new_detail])[-10:]
         self._update_station_state(
             station_id,
             {
@@ -389,6 +436,7 @@ class FlowMonitor:
                 "baseline_median": round(baseline_median, 3),
                 "last_anomaly": anomaly,
                 "recent_runs": [round(v, 3) for v in all_medians[-10:]],
+                "recent_run_details": new_details,
             },
         )
 

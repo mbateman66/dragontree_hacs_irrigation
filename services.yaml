@@ -171,3 +171,45 @@ move_station:
           options:
             - "up"
             - "down"
+
+discard_flow_run:
+  name: Discard Flow Run
+  description: >
+    Mark a specific flow monitoring run as discarded so it is excluded from
+    the station's baseline. Use this to remove runs that were recorded under
+    unusual conditions (e.g. a zone valve was manually closed). The run_id
+    can be found in the recent_run_details attribute of the station's Flow
+    Status sensor.
+  fields:
+    station_id:
+      name: Station ID
+      description: The station whose run should be discarded.
+      required: true
+      selector:
+        text:
+    run_id:
+      name: Run ID
+      description: UUID of the run to discard (from the recent_run_details sensor attribute).
+      required: true
+      selector:
+        text:
+
+discard_flow_runs_before:
+  name: Discard Flow Runs Before
+  description: >
+    Discard all flow runs for a station that are older than the given run.
+    Use this after adding or removing drippers/sprinklers to start the
+    baseline fresh from a known-good run.
+  fields:
+    station_id:
+      name: Station ID
+      description: The station to update.
+      required: true
+      selector:
+        text:
+    run_id:
+      name: Run ID
+      description: The run to anchor at — all runs older than this one are discarded.
+      required: true
+      selector:
+        text:
