@@ -67,6 +67,9 @@ def _station_switch_specs(
     specs.append(
         (f"{DOMAIN}_{sid}_sensitive", StationSensitiveSwitch(coordinator, sid))
     )
+    specs.append(
+        (f"{DOMAIN}_{sid}_flow_monitoring", StationFlowMonitoringSwitch(coordinator, sid))
+    )
 
     for stype in ("normal", "hot"):
         for queue in ("am", "pm"):
@@ -184,6 +187,48 @@ class StationSensitiveSwitch(CoordinatorEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs) -> None:
         await self.coordinator.async_update_station(self._station_id, {"sensitive": False})
+
+
+# ---------------------------------------------------------------------------
+# Per-station: flow monitoring toggle
+# ---------------------------------------------------------------------------
+
+class StationFlowMonitoringSwitch(CoordinatorEntity, SwitchEntity):
+    """Enable/disable Droplet flow monitoring for a station."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:water-check"
+
+    def __init__(self, coordinator: IrrigationCoordinator, station_id: str) -> None:
+        super().__init__(coordinator)
+        self._station_id = station_id
+        self._attr_unique_id = f"{DOMAIN}_{station_id}_flow_monitoring"
+        self._attr_device_info = CONTROLLER_DEVICE_INFO
+
+    def _get_station(self) -> dict | None:
+        return next(
+            (s for s in self.coordinator.stations if s["id"] == self._station_id), None
+        )
+
+    @property
+    def name(self) -> str:
+        return f"{self._station_id} Flow Monitoring"
+
+    @property
+    def is_on(self) -> bool:
+        s = self._get_station()
+        return bool(s.get("flow_monitoring", False)) if s else False
+
+    async def async_turn_on(self, **kwargs) -> None:
+        await self.coordinator.async_update_station(
+            self._station_id, {"flow_monitoring": True}
+        )
+        await self.coordinator.flow_monitor.async_load_station_state(self._station_id)
+
+    async def async_turn_off(self, **kwargs) -> None:
+        await self.coordinator.async_update_station(
+            self._station_id, {"flow_monitoring": False}
+        )
 
 
 # ---------------------------------------------------------------------------

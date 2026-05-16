@@ -4,6 +4,32 @@ All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] - 2026-05-16
+
+### Added
+- **Flow monitoring** — Droplet flow sensor integration with per-station anomaly
+  detection. Configurable fill time, sample interval, minimum baseline runs, and
+  alert threshold. Learns each station's normal flow profile over time and fires a
+  persistent HA notification when a run deviates from the baseline.
+- **Flow Monitor dashboard tab** — new tab in the irrigation dashboard showing the
+  learning curve for each monitored station, recent run history with median flow and
+  anomaly scores, and a toggle to enable/disable monitoring per station.
+- **`discard_flow_run` service** — mark a specific run as discarded so it is excluded
+  from the station's baseline. Run IDs are available in the `recent_run_details`
+  attribute of each station's Flow Status sensor.
+- **`discard_flow_runs_before` service** — discard all runs for a station that
+  predate a given run. Useful after hardware changes (adding/removing drippers)
+  to start the baseline fresh from a known-good run.
+- Flow Status sensor now exposes `recent_run_details` — a list of up to 10 recent
+  non-discarded runs including run ID, timestamps, median flow, IQR, steady sample
+  count, anomaly score, and baseline median at time of run.
+
+### Fixed
+- Flow monitor now ignores synthetic state events that HA fires during initial state
+  load, preventing spurious run-start events on integration startup.
+- Off-by-one in the learning-phase run counter: a station with `N-1` runs now
+  correctly transitions to the baseline-comparison phase after its `N`th run.
+
 ## [1.0.3] - 2026-03-24
 
 ### Fixed

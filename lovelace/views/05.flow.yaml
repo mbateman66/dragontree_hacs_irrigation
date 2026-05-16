@@ -1,0 +1,10 @@
+
+  ##########################################################################
+  # VIEW: Flow Monitor — learn and detect irrigation flow anomalies
+  ##########################################################################
+  - title: Flow Monitor
+    path: flow-monitor
+    icon: mdi:water-check
+    type: panel
+    cards:
+      - type: custom:dragontree-irrigation-flow-monitor

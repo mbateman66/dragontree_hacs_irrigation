@@ -24,9 +24,13 @@ from .const import (
     DOMAIN,
     PLATFORMS,
     SERVICE_ADD_STATION,
+    SERVICE_DISCARD_FLOW_RUN,
+    SERVICE_DISCARD_FLOW_RUNS_BEFORE,
     SERVICE_MOVE_STATION,
     SERVICE_REMOVE_STATION,
     SERVICE_REORDER_STATIONS,
+    SERVICE_RESET_FLOW_PROFILE,
+    SERVICE_UPDATE_FLOW_CONFIG,
     SERVICE_UPDATE_SCHEDULE,
     SERVICE_UPDATE_STATION,
 )
@@ -118,6 +122,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             SERVICE_REORDER_STATIONS,
             SERVICE_UPDATE_SCHEDULE,
             SERVICE_MOVE_STATION,
+            SERVICE_RESET_FLOW_PROFILE,
+            SERVICE_UPDATE_FLOW_CONFIG,
+            SERVICE_DISCARD_FLOW_RUN,
+            SERVICE_DISCARD_FLOW_RUNS_BEFORE,
         ]:
             hass.services.async_remove(DOMAIN, service)
 
@@ -232,6 +240,26 @@ def _register_services(hass: HomeAssistant, coordinator: IrrigationCoordinator) 
             call.data["station_id"], call.data["direction"]
         )
 
+    async def handle_reset_flow_profile(call: ServiceCall) -> None:
+        await coordinator.async_reset_flow_profile(call.data["station_id"])
+
+    async def handle_update_flow_config(call: ServiceCall) -> None:
+        data = dict(call.data)
+        # Treat empty string as None to allow clearing the sensor entity
+        if "flow_sensor_entity" in data and not data["flow_sensor_entity"]:
+            data["flow_sensor_entity"] = None
+        await coordinator.async_update_flow_config(data)
+
+    async def handle_discard_flow_run(call: ServiceCall) -> None:
+        await coordinator.async_discard_flow_run(
+            call.data["station_id"], call.data["run_id"]
+        )
+
+    async def handle_discard_flow_runs_before(call: ServiceCall) -> None:
+        await coordinator.async_discard_flow_runs_before(
+            call.data["station_id"], call.data["run_id"]
+        )
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_ADD_STATION,
@@ -306,6 +334,53 @@ def _register_services(hass: HomeAssistant, coordinator: IrrigationCoordinator) 
             {
                 vol.Required("station_id"): cv.string,
                 vol.Required("direction"): vol.In(["up", "down"]),
+            }
+        ),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RESET_FLOW_PROFILE,
+        handle_reset_flow_profile,
+        schema=vol.Schema({vol.Required("station_id"): cv.string}),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_UPDATE_FLOW_CONFIG,
+        handle_update_flow_config,
+        schema=vol.Schema(
+            {
+                vol.Optional("flow_sensor_entity"): cv.string,
+                vol.Optional("flow_alert_threshold"): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.05, max=1.0)
+                ),
+                vol.Optional("flow_min_runs"): vol.All(
+                    vol.Coerce(int), vol.Range(min=1, max=30)
+                ),
+                vol.Optional("flow_sample_interval"): vol.All(
+                    vol.Coerce(int), vol.Range(min=5, max=60)
+                ),
+            }
+        ),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_DISCARD_FLOW_RUN,
+        handle_discard_flow_run,
+        schema=vol.Schema(
+            {
+                vol.Required("station_id"): cv.string,
+                vol.Required("run_id"): cv.string,
+            }
+        ),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_DISCARD_FLOW_RUNS_BEFORE,
+        handle_discard_flow_runs_before,
+        schema=vol.Schema(
+            {
+                vol.Required("station_id"): cv.string,
+                vol.Required("run_id"): cv.string,
             }
         ),
     )

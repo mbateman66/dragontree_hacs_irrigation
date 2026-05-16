@@ -21,6 +21,10 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from .const import (
     DAYS_OF_WEEK,
     DEFAULT_AM_START_TIME,
+    DEFAULT_FLOW_ALERT_THRESHOLD,
+    DEFAULT_FLOW_FILL_TIME,
+    DEFAULT_FLOW_MIN_RUNS,
+    DEFAULT_FLOW_SAMPLE_INTERVAL,
     DEFAULT_LOOKAHEAD_DAYS,
     DEFAULT_PM_START_TIME,
     DEFAULT_RAIN_MODE,
@@ -43,6 +47,8 @@ from .const import (
     STORAGE_KEY,
     STORAGE_VERSION,
 )
+from .flow_database import FlowDatabase
+from .flow_monitor import FlowMonitor
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -64,6 +70,11 @@ DEFAULT_GLOBAL = {
     "start_time_am": DEFAULT_AM_START_TIME,
     "start_time_pm": DEFAULT_PM_START_TIME,
     "lookahead_days": DEFAULT_LOOKAHEAD_DAYS,
+    # Flow monitoring (Droplet sensor integration)
+    "flow_sensor_entity": None,
+    "flow_alert_threshold": DEFAULT_FLOW_ALERT_THRESHOLD,
+    "flow_min_runs": DEFAULT_FLOW_MIN_RUNS,
+    "flow_sample_interval": DEFAULT_FLOW_SAMPLE_INTERVAL,
 }
 
 DEFAULT_SCHEDULE = {
@@ -86,6 +97,8 @@ DEFAULT_STATION_TEMPLATE = {
     "last_run": None,
     "moisture_sensor": None,
     "moisture_max": None,
+    "flow_monitoring": False,
+    "flow_fill_time": DEFAULT_FLOW_FILL_TIME,
 }
 
 
@@ -118,15 +131,27 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         self._moisture_unsubs: list = []
         self._queue_task: asyncio.Task | None = None
 
+        db_path = hass.config.path(".storage", "dragontree_flow.db")
+        self._flow_db = FlowDatabase(db_path)
+        self._flow_monitor = FlowMonitor(hass, self._flow_db, self)
+
     # ------------------------------------------------------------------
     # Initialisation
     # ------------------------------------------------------------------
 
     async def async_initialize(self) -> None:
         """Load persisted data, merge-discover OS stations, setup triggers."""
+        self._flow_db.initialize()
+
         stored = await self._store.async_load()
         if stored:
             self._global = stored.get("global", deepcopy(DEFAULT_GLOBAL))
+            # Migration guard: add flow global keys added in this version
+            self._global.setdefault("flow_sensor_entity", None)
+            self._global.setdefault("flow_alert_threshold", DEFAULT_FLOW_ALERT_THRESHOLD)
+            self._global.setdefault("flow_min_runs", DEFAULT_FLOW_MIN_RUNS)
+            self._global.setdefault("flow_sample_interval", DEFAULT_FLOW_SAMPLE_INTERVAL)
+
             self._stations = stored.get("stations", [])
             # Migration guards for fields added in later versions
             for s in self._stations:
@@ -142,6 +167,9 @@ class IrrigationCoordinator(DataUpdateCoordinator):
                 s.setdefault("tracked", True)
                 s.setdefault("moisture_sensor", None)
                 s.setdefault("moisture_max", None)
+                # Flow monitoring fields
+                s.setdefault("flow_monitoring", False)
+                s.setdefault("flow_fill_time", DEFAULT_FLOW_FILL_TIME)
 
         # Always merge-discover: add any OS stations not yet tracked.
         # On first run (no stored data) this populates _stations from scratch.
@@ -156,6 +184,14 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         self._setup_os_listeners()
         self._setup_running_listeners()
         self._setup_moisture_listeners()
+        self._flow_monitor.setup(self._stations)
+
+        # Load persisted flow state for all monitored stations
+        for s in self._stations:
+            if s.get("flow_monitoring"):
+                self.hass.async_create_task(
+                    self._flow_monitor.async_load_station_state(s["id"])
+                )
 
         @callback
         def _schedule_recovery(_hass: HomeAssistant) -> None:
@@ -722,6 +758,7 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         self._setup_os_listeners()
         self._setup_running_listeners()
         self._setup_moisture_listeners()
+        self._flow_monitor.setup(self._stations)
         await self._save()
         async_dispatcher_send(self.hass, SIGNAL_STATIONS_UPDATED)
         self.async_set_updated_data(self._build_data())
@@ -733,6 +770,9 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         station.update(data)
         self._regenerate_schedules()
         self._setup_moisture_listeners()
+        # Re-register flow listeners if monitoring enablement changed
+        if "flow_monitoring" in data:
+            self._flow_monitor.setup(self._stations)
         await self._save()
         self.async_set_updated_data(self._build_data())
 
@@ -757,8 +797,29 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         self._setup_os_listeners()
         self._setup_running_listeners()
         self._setup_moisture_listeners()
+        self._flow_monitor.setup(self._stations)
         await self._save()
         async_dispatcher_send(self.hass, SIGNAL_STATIONS_UPDATED)
+        self.async_set_updated_data(self._build_data())
+
+    async def async_reset_flow_profile(self, station_id: str) -> None:
+        await self._flow_monitor.async_reset_profile(station_id)
+
+    async def async_discard_flow_run(self, station_id: str, run_id: str) -> None:
+        await self._flow_monitor.async_discard_run(station_id, run_id)
+
+    async def async_discard_flow_runs_before(self, station_id: str, run_id: str) -> None:
+        await self._flow_monitor.async_discard_runs_before(station_id, run_id)
+
+    async def async_update_flow_config(self, updates: dict) -> None:
+        """Update global flow monitoring configuration."""
+        allowed = {
+            "flow_sensor_entity", "flow_alert_threshold",
+            "flow_min_runs", "flow_sample_interval",
+        }
+        filtered = {k: v for k, v in updates.items() if k in allowed}
+        self._global.update(filtered)
+        await self._save()
         self.async_set_updated_data(self._build_data())
 
     async def async_reorder_stations(self, station_ids: list[str]) -> None:
@@ -832,6 +893,10 @@ class IrrigationCoordinator(DataUpdateCoordinator):
     def day_schedules(self) -> list[dict]:
         return self._day_schedules
 
+    @property
+    def flow_monitor(self) -> FlowMonitor:
+        return self._flow_monitor
+
     def cleanup(self) -> None:
         for unsub in self._time_unsubs:
             unsub()
@@ -845,6 +910,7 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         for unsub in self._moisture_unsubs:
             unsub()
         self._moisture_unsubs.clear()
+        self._flow_monitor.cleanup()
 
 
 # ------------------------------------------------------------------
