@@ -587,6 +587,9 @@ class IrrigationCoordinator(DataUpdateCoordinator):
                 self._recalculate_queue_end_time(queue_name)
                 self.async_set_updated_data(self._build_data())
 
+                if station.get("flow_monitoring"):
+                    self._flow_monitor._start_monitoring(station["id"])
+
                 self._queue_task = self.hass.async_create_task(
                     self._run_queue(queue_name, stations)
                 )

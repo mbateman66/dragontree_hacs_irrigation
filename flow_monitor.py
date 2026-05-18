@@ -275,9 +275,15 @@ class FlowMonitor:
             pass
         finally:
             end_time = datetime.now()
-            await self._analyze_run(
-                run_id, station_id, start_time, end_time, readings, fill_time
-            )
+            try:
+                await self._analyze_run(
+                    run_id, station_id, start_time, end_time, readings, fill_time
+                )
+            except Exception:
+                _LOGGER.exception(
+                    "Flow analysis failed for %s; marking idle", station_id
+                )
+                self._update_station_state(station_id, {"status": "idle"})
 
     # ------------------------------------------------------------------
     # Run analysis

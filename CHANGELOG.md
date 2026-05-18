@@ -4,6 +4,17 @@ All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.2] - 2026-05-18
+
+### Fixed
+- Flow monitoring is now started correctly when Home Assistant restarts while a
+  station is mid-run. Previously `_recover_running_station` resumed the irrigation
+  queue but never notified the flow monitor, so the entire run was silently
+  skipped. The station's run is now monitored from the point of recovery.
+- Added error handling around the post-run flow analysis so that any unexpected
+  exception logs clearly and sets the station status to `idle` rather than leaving
+  it permanently stuck at `monitoring`.
+
 ## [1.1.1] - 2026-05-16
 
 ### Fixed
