@@ -701,6 +701,7 @@ class IrrigationCoordinator(DataUpdateCoordinator):
                         station_entry["status"] = STATUS_COMPLETE
                         station["last_run"] = date.today().isoformat()
                     else:
+                        _LOGGER.warning("Station %s never started; marking failed", station["base_name"])
                         station_entry["status"] = STATUS_FAILED
 
                 self._runtime["current_station_id"] = None
