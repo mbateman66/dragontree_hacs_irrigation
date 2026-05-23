@@ -887,6 +887,7 @@
     .station.running   { color: var(--primary-color, #03a9f4); font-weight: bold; }
     .station.complete  { color: var(--disabled-text-color, #9e9e9e); }
     .station.cancelled { color: var(--disabled-text-color, #9e9e9e); text-decoration: line-through; }
+    .station.failed    { color: var(--error-color, #db4437); text-decoration: line-through; }
     .no-stations       { color: var(--secondary-text-color); font-size: 0.85em; }
   `;
 
