@@ -4,6 +4,22 @@ All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-05-23
+
+### Added
+- **Failed station status** — stations that were scheduled but never started (e.g. due to
+  a brief OpenSprinkler outage) are now marked `failed` instead of being silently marked
+  complete. Failed stations appear as red strikethrough in the calendar view so you can
+  see at a glance that watering didn't happen.
+- `last_run` is no longer updated for failed stations, so the weekly-interval scheduler
+  correctly treats them as unwatered.
+
+### Fixed
+- **OpenSprinkler unavailability recovery** — before starting each station the coordinator
+  now checks if the OpenSprinkler entity is unavailable (e.g. a brief network blip). If
+  so, it waits up to 60 seconds for it to recover before issuing the start command.
+  Previously the service call was silently dropped and the station timed out.
+
 ## [1.1.2] - 2026-05-18
 
 ### Fixed
