@@ -559,7 +559,7 @@ class IrrigationCoordinator(DataUpdateCoordinator):
             stations = queue.get("stations", [])
 
             for idx, station_entry in enumerate(stations):
-                if station_entry["status"] in (STATUS_CANCELLED, STATUS_COMPLETE):
+                if station_entry["status"] in (STATUS_CANCELLED, STATUS_COMPLETE, STATUS_FAILED):
                     continue
 
                 station = self._get_station(station_entry["station_id"])
