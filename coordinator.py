@@ -739,12 +739,15 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         finally:
             unsub()
 
-    async def _wait_for_station(self, base_name: str, timeout_seconds: int) -> None:
+    async def _wait_for_station(self, base_name: str, timeout_seconds: int) -> bool:
         """Wait for a station to start and then finish running.
 
         Sets up the state-change listener BEFORE sampling current state to
         avoid a race condition where the binary sensor turns on between the
         sample and the listener being registered.
+
+        Returns True if the station started (binary sensor went on), False if
+        it timed out before starting.
         """
         binary_sensor_id = f"binary_sensor.{base_name}_station_running"
         started = asyncio.Event()
@@ -774,13 +777,14 @@ class IrrigationCoordinator(DataUpdateCoordinator):
                     await asyncio.wait_for(started.wait(), timeout=15.0)
                 except asyncio.TimeoutError:
                     _LOGGER.warning("Timeout waiting for station %s to start", base_name)
-                    return
+                    return False
 
             # Station is on — now wait for it to finish.
             try:
                 await asyncio.wait_for(done.wait(), timeout=float(timeout_seconds))
             except asyncio.TimeoutError:
                 _LOGGER.warning("Timeout waiting for station %s to finish", base_name)
+            return True
         finally:
             unsub()
 
