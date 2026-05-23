@@ -694,11 +694,14 @@ class IrrigationCoordinator(DataUpdateCoordinator):
                         self._runtime["current_station_id"] = None
                         continue
 
-                await self._wait_for_station(station["base_name"], duration + 60)
+                started = await self._wait_for_station(station["base_name"], duration + 60)
 
                 if station_entry["status"] == STATUS_RUNNING:
-                    station_entry["status"] = STATUS_COMPLETE
-                    station["last_run"] = date.today().isoformat()
+                    if started:
+                        station_entry["status"] = STATUS_COMPLETE
+                        station["last_run"] = date.today().isoformat()
+                    else:
+                        station_entry["status"] = STATUS_FAILED
 
                 self._runtime["current_station_id"] = None
                 self._recalculate_queue_end_time(queue_name)
