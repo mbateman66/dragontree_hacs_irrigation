@@ -746,8 +746,9 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         avoid a race condition where the binary sensor turns on between the
         sample and the listener being registered.
 
-        Returns True if the station started (binary sensor went on), False if
-        it timed out before starting.
+        Returns True if the station started (binary sensor went on), regardless of
+        whether it finished within timeout_seconds. Returns False if the station
+        never started within the 15-second start timeout.
         """
         binary_sensor_id = f"binary_sensor.{base_name}_station_running"
         started = asyncio.Event()
