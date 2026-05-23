@@ -23,6 +23,7 @@ STATUS_MANUAL = "manual"
 STATUS_COMPLETE = "complete"
 STATUS_PAUSED = "paused"
 STATUS_CANCELLED = "cancelled"
+STATUS_FAILED = "failed"
 
 # Queue names
 QUEUE_AM = "am"

@@ -42,6 +42,7 @@ from .const import (
     SIGNAL_STATIONS_UPDATED,
     STATUS_CANCELLED,
     STATUS_COMPLETE,
+    STATUS_FAILED,
     STATUS_RUNNING,
     STATUS_SCHEDULED,
     STORAGE_KEY,
@@ -639,7 +640,7 @@ class IrrigationCoordinator(DataUpdateCoordinator):
     async def _run_queue(self, queue_name: str, stations: list[dict]) -> None:
         try:
             for station_entry in stations:
-                if station_entry["status"] in (STATUS_CANCELLED, STATUS_COMPLETE):
+                if station_entry["status"] in (STATUS_CANCELLED, STATUS_COMPLETE, STATUS_FAILED):
                     continue
                 if not self._global.get("master_enable"):
                     break
@@ -658,6 +659,27 @@ class IrrigationCoordinator(DataUpdateCoordinator):
 
                 if not already_running:
                     entity_id = f"switch.{station['base_name']}_station_enabled"
+
+                    # If OpenSprinkler entities are temporarily unavailable (e.g. brief
+                    # network blip), wait for them to recover before issuing the start
+                    # command — otherwise the service call is silently dropped and the
+                    # station never runs.
+                    entity_state = self.hass.states.get(entity_id)
+                    if entity_state and entity_state.state in ("unavailable", "unknown"):
+                        _LOGGER.warning(
+                            "OpenSprinkler entity %s is unavailable; waiting up to 60 s for recovery before starting %s",
+                            entity_id,
+                            station["base_name"],
+                        )
+                        if not await self._wait_for_entity_available(entity_id, timeout=60.0):
+                            _LOGGER.error(
+                                "OpenSprinkler did not recover within 60 s; skipping station %s",
+                                station["base_name"],
+                            )
+                            station_entry["status"] = STATUS_CANCELLED
+                            self._runtime["current_station_id"] = None
+                            continue
+
                     try:
                         await self.hass.services.async_call(
                             OPENSPRINKLER_DOMAIN,
@@ -693,6 +715,29 @@ class IrrigationCoordinator(DataUpdateCoordinator):
             self._runtime["current_station_id"] = None
             await self._save()
             self.async_set_updated_data(self._build_data())
+
+    async def _wait_for_entity_available(self, entity_id: str, timeout: float = 60.0) -> bool:
+        """Wait until an entity leaves unavailable/unknown state. Returns True if recovered."""
+        available = asyncio.Event()
+
+        @callback
+        def _state_changed(event: Any) -> None:
+            new_state = event.data.get("new_state")
+            if new_state and new_state.state not in ("unavailable", "unknown"):
+                available.set()
+
+        unsub = async_track_state_change_event(self.hass, [entity_id], _state_changed)
+        try:
+            current = self.hass.states.get(entity_id)
+            if current and current.state not in ("unavailable", "unknown"):
+                return True
+            try:
+                await asyncio.wait_for(available.wait(), timeout=timeout)
+                return True
+            except asyncio.TimeoutError:
+                return False
+        finally:
+            unsub()
 
     async def _wait_for_station(self, base_name: str, timeout_seconds: int) -> None:
         """Wait for a station to start and then finish running.
