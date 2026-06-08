@@ -686,7 +686,7 @@ class IrrigationCoordinator(DataUpdateCoordinator):
                             OS_SERVICE_RUN_STATION,
                             {"run_seconds": duration},
                             target={"entity_id": entity_id},
-                            blocking=False,
+                            blocking=True,
                         )
                     except Exception as err:
                         _LOGGER.error("Failed to start %s: %s", station["base_name"], err)
@@ -703,6 +703,9 @@ class IrrigationCoordinator(DataUpdateCoordinator):
                     else:
                         _LOGGER.warning("Station %s never started; marking failed", station["base_name"])
                         station_entry["status"] = STATUS_FAILED
+                        # Safety: if the station is physically running in OS despite
+                        # our timeout, stop it before the next station starts.
+                        await self._stop_station_if_running(station)
 
                 self._runtime["current_station_id"] = None
                 self._recalculate_queue_end_time(queue_name)
@@ -719,6 +722,32 @@ class IrrigationCoordinator(DataUpdateCoordinator):
             self._runtime["current_station_id"] = None
             await self._save()
             self.async_set_updated_data(self._build_data())
+
+    async def _stop_station_if_running(self, station: dict) -> None:
+        """Stop a station in OpenSprinkler if its binary sensor still reports running.
+
+        Called after a start-timeout failure to prevent two stations running at once:
+        the station may have started in OS hardware after our 15-second window closed,
+        so we check the binary sensor and issue a stop if it is physically on.
+        """
+        bs_id = f"binary_sensor.{station['base_name']}_station_running"
+        bs_state = self.hass.states.get(bs_id)
+        if not (bs_state and bs_state.state == "on"):
+            return
+        _LOGGER.warning(
+            "Station %s is physically running despite being marked failed — stopping to prevent overlap with next station",
+            station["base_name"],
+        )
+        try:
+            await self.hass.services.async_call(
+                OPENSPRINKLER_DOMAIN,
+                OS_SERVICE_STOP,
+                {},
+                target={"entity_id": f"switch.{station['base_name']}_station_enabled"},
+                blocking=True,
+            )
+        except Exception as err:
+            _LOGGER.error("Failed to stop station %s: %s", station["base_name"], err)
 
     async def _wait_for_entity_available(self, entity_id: str, timeout: float = 60.0) -> bool:
         """Wait until an entity leaves unavailable/unknown state. Returns True if recovered."""

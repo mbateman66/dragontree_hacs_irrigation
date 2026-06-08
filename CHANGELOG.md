@@ -4,6 +4,20 @@ All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] - 2026-06-08
+
+### Fixed
+- **Double-station overlap** — when a station's start-confirmation timed out (binary
+  sensor did not turn on within 15 s), the station was marked failed and the next
+  station started immediately, leaving both running simultaneously in OpenSprinkler.
+  Root cause: `run_station` was called with `blocking=False`, so the HTTP command to
+  OpenSprinkler and the subsequent coordinator refresh raced against the 15-second
+  countdown. Under any OS polling or network pressure the refresh could arrive after
+  the timeout. Fixed by switching to `blocking=True` so the HTTP command completes
+  before the countdown starts, and by adding a safety stop: if the timed-out station
+  is physically running in OS when the failure is detected, it is stopped before the
+  next station begins.
+
 ## [1.2.0] - 2026-05-23
 
 ### Added
