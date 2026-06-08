@@ -40,6 +40,16 @@ update_station:
       required: true
       selector:
         text:
+    base_name:
+      name: Base Name
+      description: >
+        Remap the station to a different OpenSprinkler entity (e.g. after the
+        station was renamed in OS or HA). Must match the slugified entity name:
+        switch.<base_name>_station_enabled. All entity listeners are
+        re-registered immediately.
+      required: false
+      selector:
+        text:
     friendly_name:
       name: Friendly Name
       required: false

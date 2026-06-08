@@ -280,6 +280,7 @@ def _register_services(hass: HomeAssistant, coordinator: IrrigationCoordinator) 
         schema=vol.Schema(
             {
                 vol.Required("station_id"): cv.string,
+                vol.Optional("base_name"): cv.string,
                 vol.Optional("friendly_name"): cv.string,
                 vol.Optional("schedule_mode"): vol.In(["Off", "Normal", "Hot"]),
                 vol.Optional("sensitive"): cv.boolean,

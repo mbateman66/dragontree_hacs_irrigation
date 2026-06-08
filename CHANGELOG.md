@@ -4,6 +4,14 @@ All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.4] - 2026-06-08
+
+### Fixed
+- **`update_station` action now accepts `base_name`** — the field was wired in the
+  coordinator but missing from the service schema and `services.yaml`, so HA rejected
+  it. Adding `base_name` to the action lets you remap a station to its renamed entity
+  from Developer Tools → Actions without editing the storage file.
+
 ## [1.2.3] - 2026-06-08
 
 ### Fixed
