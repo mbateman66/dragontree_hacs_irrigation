@@ -4,6 +4,15 @@ All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.2] - 2026-06-08
+
+### Fixed
+- **Broader pre-start overlap guard** — before starting any station the coordinator now
+  checks every tracked station's binary sensor and stops any that are physically running
+  in OpenSprinkler (excluding the station about to start). This catches unexpected
+  running stations regardless of cause — not just the immediately preceding timed-out
+  station covered by the v1.2.1 fix.
+
 ## [1.2.1] - 2026-06-08
 
 ### Fixed

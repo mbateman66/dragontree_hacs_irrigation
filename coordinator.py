@@ -680,6 +680,8 @@ class IrrigationCoordinator(DataUpdateCoordinator):
                             self._runtime["current_station_id"] = None
                             continue
 
+                    await self._stop_any_running_stations(except_station_id=station["id"])
+
                     try:
                         await self.hass.services.async_call(
                             OPENSPRINKLER_DOMAIN,
@@ -722,6 +724,35 @@ class IrrigationCoordinator(DataUpdateCoordinator):
             self._runtime["current_station_id"] = None
             await self._save()
             self.async_set_updated_data(self._build_data())
+
+    async def _stop_any_running_stations(self, except_station_id: str) -> None:
+        """Stop every tracked station that is physically running in OS except the one about to start.
+
+        Catches any station — not just the immediately preceding one — that may still be
+        on due to a prior timeout, a manual trigger, or any other unexpected state.
+        """
+        for s in self._stations:
+            if s["id"] == except_station_id:
+                continue
+            bs_id = f"binary_sensor.{s['base_name']}_station_running"
+            bs_state = self.hass.states.get(bs_id)
+            if not (bs_state and bs_state.state == "on"):
+                continue
+            _LOGGER.warning(
+                "Station %s is physically running before starting %s — stopping it first",
+                s["base_name"],
+                except_station_id,
+            )
+            try:
+                await self.hass.services.async_call(
+                    OPENSPRINKLER_DOMAIN,
+                    OS_SERVICE_STOP,
+                    {},
+                    target={"entity_id": f"switch.{s['base_name']}_station_enabled"},
+                    blocking=True,
+                )
+            except Exception as err:
+                _LOGGER.error("Failed to stop station %s: %s", s["base_name"], err)
 
     async def _stop_station_if_running(self, station: dict) -> None:
         """Stop a station in OpenSprinkler if its binary sensor still reports running.
