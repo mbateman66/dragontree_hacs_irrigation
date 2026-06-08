@@ -696,6 +696,13 @@ class IrrigationCoordinator(DataUpdateCoordinator):
                         self._runtime["current_station_id"] = None
                         continue
 
+                    # Start flow monitoring immediately after the run command is confirmed
+                    # sent, so sampling begins even if the binary sensor is slow to update.
+                    # If the binary sensor later fires its own on-transition, _start_monitoring
+                    # will restart the task from the actual on-time (resetting the fill timer).
+                    if station.get("flow_monitoring"):
+                        self._flow_monitor._start_monitoring(station["id"])
+
                 started = await self._wait_for_station(station["base_name"], duration + 60)
 
                 if station_entry["status"] == STATUS_RUNNING:
@@ -705,6 +712,10 @@ class IrrigationCoordinator(DataUpdateCoordinator):
                     else:
                         _LOGGER.warning("Station %s never started; marking failed", station["base_name"])
                         station_entry["status"] = STATUS_FAILED
+                        # If the binary sensor never confirmed the start, stop any
+                        # proactive flow monitoring we started above.
+                        if station.get("flow_monitoring"):
+                            self._flow_monitor._stop_monitoring(station["id"])
                         # Safety: if the station is physically running in OS despite
                         # our timeout, stop it before the next station starts.
                         await self._stop_station_if_running(station)
@@ -887,8 +898,14 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         station.update(data)
         self._regenerate_schedules()
         self._setup_moisture_listeners()
-        # Re-register flow listeners if monitoring enablement changed
-        if "flow_monitoring" in data:
+        # Re-register all entity listeners if base_name changed (station was renamed in OS/HA).
+        if "base_name" in data:
+            self._setup_os_listeners()
+            self._setup_running_listeners()
+            self._flow_monitor.setup(self._stations)
+            if station.get("flow_monitoring"):
+                await self._flow_monitor.async_load_station_state(station["id"])
+        elif "flow_monitoring" in data:
             self._flow_monitor.setup(self._stations)
             if data.get("flow_monitoring"):
                 await self._flow_monitor.async_load_station_state(station_id)

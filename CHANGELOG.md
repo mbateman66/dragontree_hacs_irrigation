@@ -4,6 +4,21 @@ All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.3] - 2026-06-08
+
+### Fixed
+- **Flow monitoring not starting when binary sensor is delayed** — flow monitoring now
+  starts explicitly when the run command is confirmed sent (blocking=True), rather than
+  relying solely on the binary sensor on-transition. If the binary sensor later fires
+  normally, it resets the fill timer to the actual start time. If the binary sensor never
+  confirms the start (15 s timeout), monitoring is cleanly stopped so no stale task runs.
+- **Station renamed in OS/HA breaks monitoring and start detection** — if a station's
+  entity IDs change because it was renamed in OpenSprinkler or HA (e.g. base_name
+  `3_back_drippers` → `3_back_sprinklers_north`), updating the station's `base_name`
+  via the `update_station` service now re-registers all entity listeners (OS enable
+  switch, running binary sensor, and flow monitor) against the new entity IDs. Previously
+  the listeners stayed bound to the old (now stale) entity IDs after a rename.
+
 ## [1.2.2] - 2026-06-08
 
 ### Fixed
