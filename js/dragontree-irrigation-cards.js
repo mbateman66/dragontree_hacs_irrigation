@@ -116,6 +116,13 @@
     .row-tracked td.col-tracked,
     .row-tracked td.col-os { opacity: 1; }
 
+    .os-name-row { display: flex; align-items: center; gap: 5px; }
+    .health-warn {
+      display: inline-block; font-size: 1em; cursor: default; flex-shrink: 0;
+      color: var(--warning-color, #ff9800);
+    }
+    .health-warn[hidden] { display: none; }
+
     .empty {
       text-align: center; padding: 32px 0;
       color: var(--secondary-text-color); font-style: italic;
@@ -165,7 +172,12 @@
       const stateObj  = hass.states[SENSOR];
       const stations  = stateObj && stateObj.attributes && stateObj.attributes.stations || [];
       const osStates  = stations.map(s => (hass.states['switch.' + s.base_name + '_station_enabled'] || {}).state || '');
-      const key       = JSON.stringify(stations) + osStates.join(',');
+      const healthKeys = stations.map(s => [
+        'switch.'        + s.base_name + '_station_enabled',
+        'binary_sensor.' + s.base_name + '_station_running',
+        'sensor.'        + s.base_name + '_station_status',
+      ].map(eid => { const e = hass.states[eid]; return e ? e.state : 'X'; }).join(','));
+      const key       = JSON.stringify(stations) + osStates.join(',') + '|' + healthKeys.join(';');
       if (key === this._lastKey) return;
 
       this._lastKey  = key;
@@ -222,7 +234,10 @@
           </div>
         </td>
         <td class="col-station">
-          <div class="os-label"></div>
+          <div class="os-name-row">
+            <span class="os-label"></span>
+            <span class="health-warn" title="" hidden>⚠</span>
+          </div>
           <div class="base-label"></div>
         </td>
         <td class="col-friendly">
@@ -326,6 +341,19 @@
 
       const osState = this._hass && this._hass.states['switch.' + station.base_name + '_station_enabled'];
       tr.querySelector('.os-check').checked = osState ? osState.state === 'on' : true;
+
+      const requiredEntities = [
+        'switch.'         + station.base_name + '_station_enabled',
+        'binary_sensor.'  + station.base_name + '_station_running',
+        'sensor.'         + station.base_name + '_station_status',
+      ];
+      const missing = requiredEntities.filter(eid => {
+        const e = this._hass && this._hass.states[eid];
+        return !e || e.state === 'unavailable' || e.state === 'unknown';
+      });
+      const warn = tr.querySelector('.health-warn');
+      warn.hidden = missing.length === 0;
+      warn.title  = missing.length ? 'Missing or unavailable:\n' + missing.join('\n') : '';
     }
 
     // -------------------------------------------------------------------------

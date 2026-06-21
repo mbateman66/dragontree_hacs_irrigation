@@ -130,6 +130,7 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         self._os_unsubs: list = []
         self._running_unsubs: list = []
         self._moisture_unsubs: list = []
+        self._health_unsubs: list = []
         self._queue_task: asyncio.Task | None = None
 
         db_path = hass.config.path(".storage", "dragontree_flow.db")
@@ -185,6 +186,7 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         self._setup_os_listeners()
         self._setup_running_listeners()
         self._setup_moisture_listeners()
+        self._setup_health_listeners()
         self._flow_monitor.setup(self._stations)
 
         # Load persisted flow state for all monitored stations
@@ -197,6 +199,7 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         @callback
         def _schedule_recovery(_hass: HomeAssistant) -> None:
             self.hass.async_create_task(self._recover_running_station())
+            self.hass.async_create_task(self._check_entity_health())
 
         async_at_started(self.hass, _schedule_recovery)
 
@@ -341,6 +344,31 @@ class IrrigationCoordinator(DataUpdateCoordinator):
 
         self._moisture_unsubs.append(
             async_track_state_change_event(self.hass, entity_ids, _moisture_changed)
+        )
+
+    def _setup_health_listeners(self) -> None:
+        """Watch the entity registry for additions/removals/renames of required OS entities."""
+        for unsub in self._health_unsubs:
+            unsub()
+        self._health_unsubs.clear()
+
+        entity_ids = []
+        for s in self._stations:
+            base = s["base_name"]
+            entity_ids += [
+                f"switch.{base}_station_enabled",
+                f"binary_sensor.{base}_station_running",
+                f"sensor.{base}_station_status",
+            ]
+        if not entity_ids:
+            return
+
+        @callback
+        def _registry_updated(_event: Any) -> None:
+            self.hass.async_create_task(self._check_entity_health())
+
+        self._health_unsubs.append(
+            self.hass.bus.async_listen("entity_registry_updated", _registry_updated)
         )
 
     @callback
@@ -595,6 +623,53 @@ class IrrigationCoordinator(DataUpdateCoordinator):
                     self._run_queue(queue_name, stations)
                 )
                 return
+
+    async def _check_entity_health(self) -> None:
+        """Create or dismiss a persistent notification for missing/unavailable OS entities."""
+        _NOTIFICATION_ID = "dragontree_irrigation_entity_health"
+        _REQUIRED = [
+            ("switch",         "{base}_station_enabled"),
+            ("binary_sensor",  "{base}_station_running"),
+            ("sensor",         "{base}_station_status"),
+        ]
+
+        problems: list[str] = []
+        for s in self._stations:
+            base = s["base_name"]
+            missing: list[str] = []
+            for domain, tpl in _REQUIRED:
+                entity_id = f"{domain}.{tpl.format(base=base)}"
+                state = self.hass.states.get(entity_id)
+                if state is None:
+                    missing.append(f"`{entity_id}` — not found")
+                elif state.state in ("unavailable", "unknown"):
+                    missing.append(f"`{entity_id}` — {state.state}")
+            if missing:
+                name = s.get("friendly_name") or base
+                problems.append(
+                    f"**{name}** (`{base}`):\n" + "\n".join(f"- {m}" for m in missing)
+                )
+
+        if problems:
+            message = (
+                "The following stations have missing or unavailable "
+                "OpenSprinkler entities:\n\n" + "\n\n".join(problems)
+            )
+            await self.hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "notification_id": _NOTIFICATION_ID,
+                    "title": "Dragontree Irrigation: Missing Entities",
+                    "message": message,
+                },
+            )
+        else:
+            await self.hass.services.async_call(
+                "persistent_notification",
+                "dismiss",
+                {"notification_id": _NOTIFICATION_ID},
+            )
 
     async def _start_queue(self, queue_name: str) -> None:
         if self._runtime.get("running_queue"):
@@ -886,10 +961,12 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         self._setup_os_listeners()
         self._setup_running_listeners()
         self._setup_moisture_listeners()
+        self._setup_health_listeners()
         self._flow_monitor.setup(self._stations)
         await self._save()
         async_dispatcher_send(self.hass, SIGNAL_STATIONS_UPDATED)
         self.async_set_updated_data(self._build_data())
+        await self._check_entity_health()
 
     async def async_update_station(self, station_id: str, data: dict) -> None:
         station = self._get_station(station_id)
@@ -902,9 +979,11 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         if "base_name" in data:
             self._setup_os_listeners()
             self._setup_running_listeners()
+            self._setup_health_listeners()
             self._flow_monitor.setup(self._stations)
             if station.get("flow_monitoring"):
                 await self._flow_monitor.async_load_station_state(station["id"])
+            await self._check_entity_health()
         elif "flow_monitoring" in data:
             self._flow_monitor.setup(self._stations)
             if data.get("flow_monitoring"):
@@ -933,10 +1012,12 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         self._setup_os_listeners()
         self._setup_running_listeners()
         self._setup_moisture_listeners()
+        self._setup_health_listeners()
         self._flow_monitor.setup(self._stations)
         await self._save()
         async_dispatcher_send(self.hass, SIGNAL_STATIONS_UPDATED)
         self.async_set_updated_data(self._build_data())
+        await self._check_entity_health()
 
     async def async_reset_flow_profile(self, station_id: str) -> None:
         await self._flow_monitor.async_reset_profile(station_id)

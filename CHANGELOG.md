@@ -4,6 +4,24 @@ All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.5] - 2026-06-21
+
+### Added
+- **Entity health warning icon** — each station row in the station manager card now shows
+  a ⚠ icon inline next to the station name when any of its required OpenSprinkler entities
+  (`_station_enabled`, `_station_running`, `_station_status`) are missing or unavailable.
+  Hovering the icon lists the specific problem entities.
+- **Persistent notification for missing entities** — on startup and whenever the entity
+  registry changes, the coordinator checks all station entities and creates a HA persistent
+  notification listing any that are missing or unavailable. The notification is dismissed
+  automatically once all entities are healthy.
+
+### Fixed
+- **ImportError on HA restart** — `async_track_entity_registry_updated_event` was imported
+  from `homeassistant.helpers.entity_registry` but does not exist in HA 2026.6.4, causing
+  the integration to fail to load entirely. Replaced with `hass.bus.async_listen(
+  "entity_registry_updated", ...)` which is the correct API for this HA version.
+
 ## [1.2.4] - 2026-06-08
 
 ### Fixed
