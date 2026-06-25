@@ -4,6 +4,26 @@ All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.6] - 2026-06-25
+
+### Fixed
+- **Flow status shows "idle" during active monitoring** — when the coordinator starts a
+  station, it proactively calls `_start_monitoring` before the OpenSprinkler binary sensor
+  turns on. When the sensor fires moments later, `_start_monitoring` is called a second time,
+  cancelling the first task. The cancelled task's `_analyze_run` cleanup then overwrote the
+  new task's "monitoring" status with "idle". Fixed by checking whether a live monitoring
+  task is already running before overwriting status in `_analyze_run`.
+- **Global flow config inputs revert on every HA state update** — the alert threshold, min
+  runs, and sample interval inputs in the flow monitoring config panel used
+  `document.activeElement` to detect user focus, which always returns the shadow host element
+  (not the inner input) in Shadow DOM. Inputs were therefore reset to the saved value on
+  every HA state update, making them impossible to edit. Fixed by using
+  `this.shadowRoot.activeElement` instead.
+
+### Changed
+- **Default flow baseline runs reduced from 5 to 3** — anomaly detection now activates after
+  3 valid station runs instead of 5.
+
 ## [1.2.5] - 2026-06-21
 
 ### Added

@@ -55,7 +55,7 @@ SIGNAL_STATIONS_UPDATED = f"{DOMAIN}_stations_updated"
 # Flow monitoring defaults
 DEFAULT_FLOW_FILL_TIME = 120        # seconds to ignore at run start
 DEFAULT_FLOW_ALERT_THRESHOLD = 0.25  # 25% deviation triggers anomaly
-DEFAULT_FLOW_MIN_RUNS = 5           # runs needed before alerting
+DEFAULT_FLOW_MIN_RUNS = 3           # runs needed before alerting
 DEFAULT_FLOW_SAMPLE_INTERVAL = 10   # seconds between Droplet readings
 
 # Flow status values

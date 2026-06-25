@@ -1536,16 +1536,17 @@
           this._sensorDirty ? sensorSelect.value : flowCfg.flow_sensor_entity
         );
       }
+      const shadowActive = this.shadowRoot.activeElement;
       const thresholdEl = this.shadowRoot.getElementById('cfgThreshold');
-      if (thresholdEl && document.activeElement !== thresholdEl) {
+      if (thresholdEl && shadowActive !== thresholdEl) {
         thresholdEl.value = Math.round((flowCfg.flow_alert_threshold ?? 0.25) * 100);
       }
       const minRunsEl = this.shadowRoot.getElementById('cfgMinRuns');
-      if (minRunsEl && document.activeElement !== minRunsEl) {
+      if (minRunsEl && shadowActive !== minRunsEl) {
         minRunsEl.value = flowCfg.flow_min_runs ?? 5;
       }
       const intervalEl = this.shadowRoot.getElementById('cfgInterval');
-      if (intervalEl && document.activeElement !== intervalEl) {
+      if (intervalEl && shadowActive !== intervalEl) {
         intervalEl.value = flowCfg.flow_sample_interval ?? 10;
       }
       // First load: snapshot form state so the button starts disabled.

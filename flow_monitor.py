@@ -128,6 +128,11 @@ class FlowMonitor:
     # Monitoring lifecycle
     # ------------------------------------------------------------------
 
+    def _is_monitoring_active(self, station_id: str) -> bool:
+        """Return True if a live monitoring task exists for this station."""
+        task = self._active_tasks.get(station_id)
+        return task is not None and not task.done()
+
     def _start_monitoring(self, station_id: str) -> None:
         if station_id in self._active_tasks:
             self._active_tasks[station_id].cancel()
@@ -283,7 +288,8 @@ class FlowMonitor:
                 _LOGGER.exception(
                     "Flow analysis failed for %s; marking idle", station_id
                 )
-                self._update_station_state(station_id, {"status": "idle"})
+                if not self._is_monitoring_active(station_id):
+                    self._update_station_state(station_id, {"status": "idle"})
 
     # ------------------------------------------------------------------
     # Run analysis
@@ -335,7 +341,8 @@ class FlowMonitor:
             )
             run_record["discarded"] = 1
             await self._db.save_run(run_record)
-            self._update_station_state(station_id, {"status": "idle"})
+            if not self._is_monitoring_active(station_id):
+                self._update_station_state(station_id, {"status": "idle"})
             return
 
         filtered = _iqr_filter(steady_readings)
@@ -346,7 +353,8 @@ class FlowMonitor:
             )
             run_record["discarded"] = 1
             await self._db.save_run(run_record)
-            self._update_station_state(station_id, {"status": "idle"})
+            if not self._is_monitoring_active(station_id):
+                self._update_station_state(station_id, {"status": "idle"})
             return
 
         run_median = statistics.median(filtered)
