@@ -28,6 +28,7 @@ from .const import (
     DEFAULT_LOOKAHEAD_DAYS,
     DEFAULT_PM_START_TIME,
     DEFAULT_RAIN_MODE,
+    DEFAULT_STATION_MANUAL_DURATION,
     DEFAULT_WEEK_INTERVAL,
     DOMAIN,
     OPENSPRINKLER_DOMAIN,
@@ -172,6 +173,7 @@ class IrrigationCoordinator(DataUpdateCoordinator):
                 # Flow monitoring fields
                 s.setdefault("flow_monitoring", False)
                 s.setdefault("flow_fill_time", DEFAULT_FLOW_FILL_TIME)
+                s.setdefault("manual_duration", DEFAULT_STATION_MANUAL_DURATION)
 
         # Always merge-discover: add any OS stations not yet tracked.
         # On first run (no stored data) this populates _stations from scratch.

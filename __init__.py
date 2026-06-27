@@ -289,6 +289,9 @@ def _register_services(hass: HomeAssistant, coordinator: IrrigationCoordinator) 
                 vol.Optional("moisture_max"): vol.All(
                     vol.Coerce(float), vol.Range(min=0, max=100)
                 ),
+                vol.Optional("manual_duration"): vol.All(
+                    vol.Coerce(int), vol.Range(min=1, max=120)
+                ),
             }
         ),
     )

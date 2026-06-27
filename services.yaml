@@ -90,6 +90,15 @@ update_station:
           min: 0
           max: 100
           unit_of_measurement: "%"
+    manual_duration:
+      name: Manual Run Duration (minutes)
+      description: Default duration shown in the Run Stations tab for this station.
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 120
+          unit_of_measurement: min
 
 remove_station:
   name: Remove Station
