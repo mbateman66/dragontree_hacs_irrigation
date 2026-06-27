@@ -1152,6 +1152,11 @@
         return;
       }
 
+      // Clear if transitioning from the empty-state message to real rows
+      if (tbody.children.length && !tbody.children[0].dataset.sid) {
+        while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+      }
+
       while (tbody.children.length < stations.length) tbody.appendChild(this._makeRow());
       while (tbody.children.length > stations.length) tbody.removeChild(tbody.lastChild);
 
