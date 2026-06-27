@@ -22,6 +22,7 @@ Add a new "Run Stations" tab to the irrigation dashboard that lets the user manu
 - Two cases:
   - **Queue running** (`current_station_id` is set): sets `_manual_stop_requested = True` on the coordinator, then calls `opensprinkler.stop` on the current station's switch entity
   - **Manual run** (no queue): scans `binary_sensor.<base>_station_running` across all tracked stations to find the one that is `on`, then calls `opensprinkler.stop` on it
+- If nothing is physically running, the service is a no-op (no error)
 
 ### Queue cancellation on manual stop
 
