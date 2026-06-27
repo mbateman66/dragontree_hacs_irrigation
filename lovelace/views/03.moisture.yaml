@@ -1,0 +1,11 @@
+
+  ##########################################################################
+  # VIEW: Moisture Sensors
+  # Shows all unique moisture sensors configured across stations.
+  # Click any row to open the HA more-info dialog with full history.
+  ##########################################################################
+  - title: Moisture
+    path: moisture
+    icon: mdi:water-percent
+    cards:
+      - type: custom:dragontree-irrigation-moisture-status

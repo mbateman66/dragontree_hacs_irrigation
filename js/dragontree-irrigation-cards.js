@@ -2104,6 +2104,145 @@
 
   customElements.define('dragontree-irrigation-flow-monitor', DragontreeFlowMonitor);
 
+  // =========================================================================
+  // dragontree-irrigation-moisture-status  (Moisture Sensors view)
+  // =========================================================================
+
+  const MOISTURE_STYLES = `
+    :host { display: block; width: fit-content; }
+    .card {
+      background: var(--ha-card-background, var(--card-background-color, white));
+      border-radius: var(--ha-card-border-radius, 12px);
+      box-shadow: var(--ha-card-box-shadow, none);
+      border: 1px solid var(--ha-card-border-color, var(--divider-color, #e0e0e0));
+      overflow: hidden;
+      min-width: 320px;
+    }
+    .card-header {
+      padding: 16px 16px 8px;
+      font-size: 1.5em; font-weight: 500;
+      color: var(--ha-card-header-color, var(--primary-text-color));
+    }
+    .card-content { padding: 0; }
+    .sensor-row {
+      display: flex; align-items: center;
+      padding: 10px 16px; gap: 16px; cursor: pointer;
+      border-top: 1px solid var(--divider-color, #e0e0e0);
+      transition: background 0.1s;
+    }
+    .sensor-row:hover { background: var(--secondary-background-color, rgba(0,0,0,0.04)); }
+    .sensor-info { flex: 1; min-width: 0; }
+    .sensor-name {
+      font-size: 0.95em; color: var(--primary-text-color);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .sensor-stations { font-size: 0.78em; color: var(--secondary-text-color); margin-top: 2px; }
+    .sensor-value {
+      font-size: 1.3em; font-weight: 500;
+      color: var(--primary-text-color); white-space: nowrap; text-align: right;
+    }
+    .sensor-unit { font-size: 0.65em; color: var(--secondary-text-color); margin-left: 2px; }
+    .empty {
+      padding: 32px 16px; text-align: center;
+      color: var(--secondary-text-color); font-style: italic;
+    }
+  `;
+
+  class DragontreeMoistureStatus extends HTMLElement {
+
+    setConfig(config) {
+      this._config  = config || {};
+      this._lastKey = null;
+
+      if (!this.shadowRoot) {
+        this.attachShadow({ mode: 'open' });
+        this.shadowRoot.innerHTML = `
+          <style>${MOISTURE_STYLES}</style>
+          <div class="card">
+            <div class="card-header">Moisture Sensors</div>
+            <div class="card-content" id="content"></div>
+          </div>`;
+      }
+    }
+
+    getCardSize() { return Math.max(2, (this._sensorCount || 1) + 1); }
+
+    set hass(hass) {
+      this._hass = hass;
+      if (!this.shadowRoot) return;
+
+      const stateObj = hass.states[SENSOR];
+      const stations = stateObj?.attributes?.stations || [];
+
+      // Collect unique sensors across all stations (tracked or not)
+      const seen    = new Set();
+      const sensors = [];
+      for (const s of stations) {
+        if (s.moisture_sensor && !seen.has(s.moisture_sensor)) {
+          seen.add(s.moisture_sensor);
+          const assocNames = stations
+            .filter(t => t.moisture_sensor === s.moisture_sensor)
+            .map(t => t.friendly_name || t.base_name);
+          sensors.push({ entityId: s.moisture_sensor, stations: assocNames });
+        }
+      }
+      this._sensorCount = sensors.length;
+
+      const key = sensors.map(s => {
+        const st = hass.states[s.entityId];
+        return `${s.entityId}:${st?.state || 'u'}`;
+      }).join(',');
+      if (key === this._lastKey) return;
+      this._lastKey = key;
+
+      const content = this.shadowRoot.getElementById('content');
+      content.innerHTML = '';
+
+      if (!sensors.length) {
+        const div = document.createElement('div');
+        div.className = 'empty';
+        div.textContent = 'No moisture sensors configured on any station.';
+        content.appendChild(div);
+        return;
+      }
+
+      for (const sensor of sensors) {
+        const st    = hass.states[sensor.entityId];
+        const state = st?.state;
+        const unit  = st?.attributes?.unit_of_measurement || '%';
+        const name  = st?.attributes?.friendly_name || sensor.entityId;
+
+        const row = document.createElement('div');
+        row.className = 'sensor-row';
+        row.innerHTML = `
+          <div class="sensor-info">
+            <div class="sensor-name">${this._esc(name)}</div>
+            <div class="sensor-stations">${this._esc(sensor.stations.join(', '))}</div>
+          </div>
+          <div class="sensor-value">
+            ${state != null && state !== 'unavailable' && state !== 'unknown'
+              ? `${this._esc(state)}<span class="sensor-unit">${this._esc(unit)}</span>`
+              : '<span style="font-size:0.7em;color:var(--secondary-text-color)">unavailable</span>'}
+          </div>`;
+
+        row.addEventListener('click', () => {
+          this.dispatchEvent(new CustomEvent('hass-more-info', {
+            bubbles: true, composed: true,
+            detail: { entityId: sensor.entityId },
+          }));
+        });
+
+        content.appendChild(row);
+      }
+    }
+
+    _esc(s) {
+      return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+  }
+
+  customElements.define('dragontree-irrigation-moisture-status', DragontreeMoistureStatus);
+
 
   window.customCards = window.customCards || [];
   window.customCards.push(
@@ -2136,6 +2275,11 @@
       type:        'dragontree-irrigation-flow-monitor',
       name:        'Dragontree Flow Monitor',
       description: 'Per-station flow learning, baseline chart, anomaly status, and config.',
+    },
+    {
+      type:        'dragontree-irrigation-moisture-status',
+      name:        'Dragontree Moisture Status',
+      description: 'All configured moisture sensors deduplicated; click a row to see history.',
     },
   );
 
