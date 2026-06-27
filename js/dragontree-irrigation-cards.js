@@ -1086,6 +1086,8 @@
       this._lastKey               = null;
       this._optimisticRunningBase = null;
       this._optimisticStopped     = false;
+      this._sawOnAfterStop        = false;
+      this._stopClickTime         = 0;
       this._lastQueueActive       = false;
 
       if (!this.shadowRoot) {
@@ -1129,9 +1131,19 @@
         return bs && bs.state === 'on';
       })?.base_name || null;
 
-      // Clear optimistic states once real HA state catches up
-      if (runningBase) this._optimisticRunningBase = null;
-      if (!runningBase) this._optimisticStopped = false;
+      // Clear optimistic states once real HA state catches up.
+      // _optimisticStopped must survive the binary sensor's delayed ON fire after a
+      // fast Start→Stop: only clear it after seeing ON→OFF, or after a 10s fallback.
+      if (runningBase) {
+        this._optimisticRunningBase = null;
+        if (this._optimisticStopped) this._sawOnAfterStop = true;
+      }
+      if (this._optimisticStopped && !runningBase) {
+        if (this._sawOnAfterStop || Date.now() - this._stopClickTime > 10000) {
+          this._optimisticStopped = false;
+          this._sawOnAfterStop    = false;
+        }
+      }
       const effectiveRunningBase = this._optimisticStopped ? null
         : (this._optimisticRunningBase || runningBase);
       this._lastQueueActive = queueActive;
@@ -1188,9 +1200,10 @@
 
       tr.querySelector('.stop-btn').addEventListener('click', () => {
         this._hass.callService(DOMAIN, 'stop_station', {});
-        // Optimistic update: clear running state immediately
         this._optimisticRunningBase = null;
         this._optimisticStopped     = true;
+        this._sawOnAfterStop        = false;
+        this._stopClickTime         = Date.now();
         this._lastKey               = null;
         this._sync(false, this._lastQueueActive, null);
       });
@@ -1202,10 +1215,12 @@
           station_id:       sid,
           duration_seconds: dur * 60,
         });
-        // Optimistic update: reflect running state immediately without waiting for binary sensor
+        // Clear any stop optimistic, then set start optimistic
+        this._optimisticStopped     = false;
+        this._sawOnAfterStop        = false;
         this._optimisticRunningBase = this._stationById(sid)?.base_name || null;
         if (this._optimisticRunningBase) {
-          this._lastKey = null; // force re-sync on next hass update
+          this._lastKey = null;
           this._sync(true, this._lastQueueActive, this._optimisticRunningBase);
         }
       });
