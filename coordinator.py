@@ -136,6 +136,7 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         self._health_unsubs: list = []
         self._queue_task: asyncio.Task | None = None
         self._manual_stop_requested: bool = False
+        self._manual_station_id: str | None = None  # station started via async_run_station_manual
 
         db_path = hass.config.path(".storage", "dragontree_flow.db")
         self._flow_db = FlowDatabase(db_path)
@@ -1097,6 +1098,7 @@ class IrrigationCoordinator(DataUpdateCoordinator):
             target={"entity_id": entity_id},
             blocking=True,
         )
+        self._manual_station_id = station_id
         if station.get("flow_monitoring"):
             self._flow_monitor._start_monitoring(station["id"])
 
@@ -1116,19 +1118,27 @@ class IrrigationCoordinator(DataUpdateCoordinator):
                     blocking=True,
                 )
         else:
-            # Manual run — find whichever station is physically on and stop it
-            for s in self._stations:
-                bs_id = f"binary_sensor.{s['base_name']}_station_running"
-                bs_state = self.hass.states.get(bs_id)
-                if bs_state and bs_state.state == "on":
-                    await self.hass.services.async_call(
-                        OPENSPRINKLER_DOMAIN,
-                        OS_SERVICE_STOP,
-                        {},
-                        target={"entity_id": f"switch.{s['base_name']}_station_enabled"},
-                        blocking=True,
-                    )
-                    break
+            # Manual run — prefer the tracked station (covers the window before the binary
+            # sensor fires ON), fall back to scanning binary sensors
+            target = None
+            if self._manual_station_id:
+                target = self._get_station(self._manual_station_id)
+            if target is None:
+                for s in self._stations:
+                    bs_id = f"binary_sensor.{s['base_name']}_station_running"
+                    bs_state = self.hass.states.get(bs_id)
+                    if bs_state and bs_state.state == "on":
+                        target = s
+                        break
+            if target:
+                self._manual_station_id = None
+                await self.hass.services.async_call(
+                    OPENSPRINKLER_DOMAIN,
+                    OS_SERVICE_STOP,
+                    {},
+                    target={"entity_id": f"switch.{target['base_name']}_station_enabled"},
+                    blocking=True,
+                )
 
     # ------------------------------------------------------------------
     # Internal helpers
