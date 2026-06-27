@@ -1,0 +1,33 @@
+
+  ##########################################################################
+  # VIEW: Config — Global settings and station management
+  ##########################################################################
+  - title: Config
+    path: config
+    icon: mdi:cog
+    type: panel
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: entities
+            title: Global Settings
+            entities:
+              - entity: switch.dragontree_irrigation_master_enable
+                name: Master Enable
+              - entity: select.dragontree_irrigation_rain_mode
+                name: Rain Mode
+              - entity: time.dragontree_irrigation_am_queue_start
+                name: AM Queue Start
+              - entity: time.dragontree_irrigation_pm_queue_start
+                name: PM Queue Start
+              - entity: number.dragontree_irrigation_lookahead_days
+                name: Lookahead Days
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: binary_sensor.dragontree_irrigation_queue_time_conflict
+                state: "on"
+            card:
+              type: markdown
+              content: ⚠️ **AM Queue Start must be before PM Queue Start.**
+          - type: custom:dragontree-irrigation-station-manager
