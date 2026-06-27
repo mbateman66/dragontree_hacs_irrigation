@@ -16,6 +16,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_change
 from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
@@ -1073,6 +1074,26 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         self._regenerate_schedules()
         await self._save()
         self.async_set_updated_data(self._build_data())
+
+    async def async_run_station_manual(self, station_id: str, duration_seconds: int) -> None:
+        """Start a station manually outside the queue."""
+        if self._runtime.get("running_queue") or self._runtime.get("current_station_id"):
+            raise HomeAssistantError(
+                "Cannot start a manual run while a queue or station is already running."
+            )
+        station = self._get_station(station_id)
+        if not station:
+            raise HomeAssistantError(f"Station '{station_id}' not found")
+        entity_id = f"switch.{station['base_name']}_station_enabled"
+        await self.hass.services.async_call(
+            OPENSPRINKLER_DOMAIN,
+            OS_SERVICE_RUN_STATION,
+            {"run_seconds": duration_seconds},
+            target={"entity_id": entity_id},
+            blocking=True,
+        )
+        if station.get("flow_monitoring"):
+            self._flow_monitor._start_monitoring(station["id"])
 
     # ------------------------------------------------------------------
     # Internal helpers

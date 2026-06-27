@@ -232,3 +232,21 @@ discard_flow_runs_before:
       required: true
       selector:
         text:
+
+start_station:
+  name: Start Station
+  description: Manually start a station outside the scheduled queue. Blocked if a queue or any station is already running.
+  fields:
+    station_id:
+      name: Station ID
+      required: true
+      selector:
+        text:
+    duration_seconds:
+      name: Duration (seconds)
+      required: true
+      selector:
+        number:
+          min: 60
+          max: 7200
+          unit_of_measurement: s

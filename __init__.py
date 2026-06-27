@@ -30,6 +30,7 @@ from .const import (
     SERVICE_REMOVE_STATION,
     SERVICE_REORDER_STATIONS,
     SERVICE_RESET_FLOW_PROFILE,
+    SERVICE_START_STATION,
     SERVICE_UPDATE_FLOW_CONFIG,
     SERVICE_UPDATE_SCHEDULE,
     SERVICE_UPDATE_STATION,
@@ -126,6 +127,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             SERVICE_UPDATE_FLOW_CONFIG,
             SERVICE_DISCARD_FLOW_RUN,
             SERVICE_DISCARD_FLOW_RUNS_BEFORE,
+            SERVICE_START_STATION,
         ]:
             hass.services.async_remove(DOMAIN, service)
 
@@ -260,6 +262,11 @@ def _register_services(hass: HomeAssistant, coordinator: IrrigationCoordinator) 
             call.data["station_id"], call.data["run_id"]
         )
 
+    async def handle_start_station(call: ServiceCall) -> None:
+        await coordinator.async_run_station_manual(
+            call.data["station_id"], call.data["duration_seconds"]
+        )
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_ADD_STATION,
@@ -385,6 +392,19 @@ def _register_services(hass: HomeAssistant, coordinator: IrrigationCoordinator) 
             {
                 vol.Required("station_id"): cv.string,
                 vol.Required("run_id"): cv.string,
+            }
+        ),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_START_STATION,
+        handle_start_station,
+        schema=vol.Schema(
+            {
+                vol.Required("station_id"): cv.string,
+                vol.Required("duration_seconds"): vol.All(
+                    vol.Coerce(int), vol.Range(min=60, max=7200)
+                ),
             }
         ),
     )
