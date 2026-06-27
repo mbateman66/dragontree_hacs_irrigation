@@ -250,3 +250,7 @@ start_station:
           min: 60
           max: 7200
           unit_of_measurement: s
+
+stop_station:
+  name: Stop Station
+  description: Stop whatever station is currently running. If a queue is active, the current station is marked cancelled and the queue advances to the next station. No-op if nothing is running.

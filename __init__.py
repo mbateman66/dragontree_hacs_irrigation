@@ -31,6 +31,7 @@ from .const import (
     SERVICE_REORDER_STATIONS,
     SERVICE_RESET_FLOW_PROFILE,
     SERVICE_START_STATION,
+    SERVICE_STOP_STATION,
     SERVICE_UPDATE_FLOW_CONFIG,
     SERVICE_UPDATE_SCHEDULE,
     SERVICE_UPDATE_STATION,
@@ -267,6 +268,9 @@ def _register_services(hass: HomeAssistant, coordinator: IrrigationCoordinator) 
             call.data["station_id"], call.data["duration_seconds"]
         )
 
+    async def handle_stop_station(call: ServiceCall) -> None:
+        await coordinator.async_stop_station_manual()
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_ADD_STATION,
@@ -407,4 +411,10 @@ def _register_services(hass: HomeAssistant, coordinator: IrrigationCoordinator) 
                 ),
             }
         ),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_STOP_STATION,
+        handle_stop_station,
+        schema=vol.Schema({}),
     )
