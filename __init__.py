@@ -129,6 +129,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             SERVICE_DISCARD_FLOW_RUN,
             SERVICE_DISCARD_FLOW_RUNS_BEFORE,
             SERVICE_START_STATION,
+            SERVICE_STOP_STATION,
         ]:
             hass.services.async_remove(DOMAIN, service)
 
