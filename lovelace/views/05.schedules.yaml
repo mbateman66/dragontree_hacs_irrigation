@@ -4,7 +4,7 @@
   ##########################################################################
   - title: Station
     path: schedules
-    icon: mdi:valve
+    icon: mdi:faucet
     type: panel
     cards:
       - type: custom:dragontree-irrigation-station-schedules
