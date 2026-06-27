@@ -1105,9 +1105,9 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         current_sid = self._runtime.get("current_station_id")
         if current_sid:
             # Queue is running — signal cancellation then stop OS
-            self._manual_stop_requested = True
             station = self._get_station(current_sid)
             if station:
+                self._manual_stop_requested = True
                 await self.hass.services.async_call(
                     OPENSPRINKLER_DOMAIN,
                     OS_SERVICE_STOP,
