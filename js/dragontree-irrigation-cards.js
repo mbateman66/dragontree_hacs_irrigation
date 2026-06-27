@@ -1011,6 +1011,233 @@
   customElements.define('dragontree-irrigation-schedule-calendar', DragontreeScheduleCalendar);
 
   // =========================================================================
+  // dragontree-irrigation-station-control  (Run Stations view)
+  // =========================================================================
+
+  const CONTROL_STYLES = `
+    :host { display: block; }
+    .card {
+      background: var(--ha-card-background, var(--card-background-color, white));
+      border-radius: var(--ha-card-border-radius, 12px);
+      box-shadow: var(--ha-card-box-shadow, none);
+      border: 1px solid var(--ha-card-border-color, var(--divider-color, #e0e0e0));
+      overflow: hidden;
+    }
+    .card-header {
+      padding: 16px 16px 8px;
+      font-size: 1.5em; font-weight: 500;
+      color: var(--ha-card-header-color, var(--primary-text-color));
+    }
+    .card-content { padding: 0 16px 16px; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+    thead th {
+      padding: 6px 10px; text-align: left;
+      font-size: 0.75em; font-weight: 600; letter-spacing: 0.06em;
+      text-transform: uppercase; color: var(--secondary-text-color);
+      border-bottom: 2px solid var(--divider-color, #e0e0e0);
+      white-space: nowrap;
+    }
+    tbody td { padding: 8px 10px; vertical-align: middle; }
+    tbody tr + tr td { border-top: 1px solid var(--divider-color, #e0e0e0); }
+    .col-name { min-width: 150px; }
+    .col-stop, .col-start { width: 90px; }
+    .col-dur { width: 130px; }
+    .station-name { font-size: 0.95em; color: var(--primary-text-color); }
+    .action-btn {
+      padding: 5px 12px; font-size: 0.82em; cursor: pointer;
+      border-radius: 6px; border: 1px solid transparent; font-weight: 500;
+      transition: opacity 0.15s;
+    }
+    .stop-btn {
+      background: var(--error-color, #db4437); color: white;
+      border-color: var(--error-color, #db4437);
+    }
+    .start-btn {
+      background: var(--primary-color, #03a9f4); color: white;
+      border-color: var(--primary-color, #03a9f4);
+    }
+    .action-btn:disabled {
+      background: var(--secondary-background-color, #f5f5f5);
+      border-color: var(--divider-color, #e0e0e0);
+      color: var(--secondary-text-color); cursor: default; opacity: 0.45;
+    }
+    .action-btn:hover:not(:disabled) { opacity: 0.82; }
+    .dur-input {
+      width: 52px; padding: 4px 8px; text-align: right;
+      border: 1px solid var(--divider-color, #e0e0e0); border-radius: 6px;
+      background: var(--secondary-background-color, #f5f5f5);
+      color: var(--primary-text-color); font-size: 0.88em;
+    }
+    .dur-input:focus { outline: none; border-color: var(--primary-color, #03a9f4); }
+    .dur-unit { font-size: 0.78em; color: var(--secondary-text-color); margin-left: 4px; }
+    .row-running { background: rgba(var(--rgb-primary-color, 3, 169, 244), 0.08); }
+    .empty {
+      text-align: center; padding: 32px 0;
+      color: var(--secondary-text-color); font-style: italic;
+    }
+  `;
+
+  class DragontreeStationControl extends HTMLElement {
+
+    setConfig(config) {
+      this._config   = config || {};
+      this._stations = [];
+      this._editing  = false;
+      this._lastKey  = null;
+
+      if (!this.shadowRoot) {
+        this.attachShadow({ mode: 'open' });
+        this.shadowRoot.innerHTML = `
+          <style>${CONTROL_STYLES}</style>
+          <div class="card">
+            <div class="card-header">Run Stations</div>
+            <div class="card-content">
+              <table>
+                <thead><tr>
+                  <th class="col-name">Station</th>
+                  <th class="col-stop">Stop</th>
+                  <th class="col-start">Start</th>
+                  <th class="col-dur">Duration</th>
+                </tr></thead>
+                <tbody id="sbody"></tbody>
+              </table>
+            </div>
+          </div>`;
+      }
+    }
+
+    getCardSize() {
+      return Math.max(3, this._stations.length + 2);
+    }
+
+    set hass(hass) {
+      this._hass = hass;
+      if (!this.shadowRoot || this._editing) return;
+
+      const stateObj  = hass.states[SENSOR];
+      const stations  = (stateObj?.attributes?.stations || [])
+        .filter(s => s.tracked !== false);
+
+      const queueState   = hass.states['sensor.dragontree_irrigation_running_queue'];
+      const queueActive  = queueState && queueState.state !== 'idle';
+
+      const runningBase  = stations.find(s => {
+        const bs = hass.states[`binary_sensor.${s.base_name}_station_running`];
+        return bs && bs.state === 'on';
+      })?.base_name || null;
+
+      const key = stations.map(s =>
+        `${s.id}|${s.friendly_name}|${s.manual_duration}`
+      ).join(',') + '|' + (runningBase || '') + '|' + (queueActive ? 'q' : 'i');
+
+      if (key === this._lastKey) return;
+      this._lastKey  = key;
+      this._stations = stations;
+      this._sync(!!runningBase, queueActive, runningBase);
+    }
+
+    _sync(anyRunning, queueActive, runningBase) {
+      const tbody    = this.shadowRoot.getElementById('sbody');
+      const stations = this._stations;
+
+      if (!stations.length) {
+        while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 4;
+        td.className = 'empty';
+        td.textContent = 'No stations found — reload the Dragontree Irrigation integration.';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+      }
+
+      while (tbody.children.length < stations.length) tbody.appendChild(this._makeRow());
+      while (tbody.children.length > stations.length) tbody.removeChild(tbody.lastChild);
+
+      for (let i = 0; i < stations.length; i++) {
+        this._patchRow(tbody.children[i], stations[i], anyRunning, queueActive, runningBase);
+      }
+    }
+
+    _makeRow() {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="col-name"><span class="station-name"></span></td>
+        <td class="col-stop"><button class="action-btn stop-btn">Stop</button></td>
+        <td class="col-start"><button class="action-btn start-btn">Start</button></td>
+        <td class="col-dur">
+          <input class="dur-input" type="number" min="1" max="120" step="1" />
+          <span class="dur-unit">min</span>
+        </td>`;
+
+      tr.querySelector('.stop-btn').addEventListener('click', () => {
+        this._hass.callService(DOMAIN, 'stop_station', {});
+      });
+
+      tr.querySelector('.start-btn').addEventListener('click', () => {
+        const sid = tr.dataset.sid;
+        const dur = parseInt(tr.querySelector('.dur-input').value, 10) || 5;
+        this._hass.callService(DOMAIN, 'start_station', {
+          station_id:       sid,
+          duration_seconds: dur * 60,
+        });
+      });
+
+      const durInput = tr.querySelector('.dur-input');
+      durInput.addEventListener('focus',   () => { this._editing = true; });
+      durInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter')  durInput.blur();
+        if (e.key === 'Escape') {
+          const s = this._stationById(tr.dataset.sid);
+          if (s) durInput.value = s.manual_duration || 5;
+          durInput.blur();
+        }
+      });
+      durInput.addEventListener('blur', () => {
+        this._editing = false;
+        const sid    = tr.dataset.sid;
+        const s      = this._stationById(sid);
+        const newVal = parseInt(durInput.value, 10);
+        if (s && !isNaN(newVal) && newVal >= 1 && newVal <= 120
+            && newVal !== (s.manual_duration || 5)) {
+          s.manual_duration = newVal;
+          this._hass.callService(DOMAIN, 'update_station', {
+            station_id:      sid,
+            manual_duration: newVal,
+          });
+        }
+      });
+
+      return tr;
+    }
+
+    _patchRow(tr, station, anyRunning, queueActive, runningBase) {
+      tr.dataset.sid = station.id;
+      tr.className   = station.base_name === runningBase ? 'row-running' : '';
+
+      tr.querySelector('.station-name').textContent = station.friendly_name || station.base_name;
+
+      const stopBtn  = tr.querySelector('.stop-btn');
+      const startBtn = tr.querySelector('.start-btn');
+      const durInput = tr.querySelector('.dur-input');
+
+      stopBtn.disabled  = station.base_name !== runningBase;
+      startBtn.disabled = anyRunning || queueActive;
+
+      if (!this._editing) {
+        durInput.value = station.manual_duration || 5;
+      }
+    }
+
+    _stationById(sid) {
+      return this._stations.find(s => s.id === sid) || null;
+    }
+  }
+
+  customElements.define('dragontree-irrigation-station-control', DragontreeStationControl);
+
+  // =========================================================================
   // dragontree-irrigation-flow-monitor  (Flow Monitor view)
   // =========================================================================
 
@@ -1858,6 +2085,11 @@
       type:        'dragontree-irrigation-schedule-calendar',
       name:        'Dragontree Schedule Calendar',
       description: 'Lookahead schedule table with per-station status styling.',
+    },
+    {
+      type:        'dragontree-irrigation-station-control',
+      name:        'Dragontree Station Control',
+      description: 'Manually start and stop irrigation stations with per-station duration.',
     },
     {
       type:        'dragontree-irrigation-flow-monitor',
