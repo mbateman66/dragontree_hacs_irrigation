@@ -1080,10 +1080,12 @@
   class DragontreeStationControl extends HTMLElement {
 
     setConfig(config) {
-      this._config   = config || {};
-      this._stations = [];
-      this._editing  = false;
-      this._lastKey  = null;
+      this._config                = config || {};
+      this._stations              = [];
+      this._editing               = false;
+      this._lastKey               = null;
+      this._optimisticRunningBase = null;
+      this._lastQueueActive       = false;
 
       if (!this.shadowRoot) {
         this.attachShadow({ mode: 'open' });
@@ -1126,14 +1128,19 @@
         return bs && bs.state === 'on';
       })?.base_name || null;
 
+      // Clear optimistic state once HA confirms a station is physically running
+      if (runningBase) this._optimisticRunningBase = null;
+      const effectiveRunningBase = this._optimisticRunningBase || runningBase;
+      this._lastQueueActive = queueActive;
+
       const key = stations.map(s =>
         `${s.id}|${s.friendly_name}|${s.manual_duration}`
-      ).join(',') + '|' + (runningBase || '') + '|' + (queueActive ? 'q' : 'i');
+      ).join(',') + '|' + (effectiveRunningBase || '') + '|' + (queueActive ? 'q' : 'i');
 
       if (key === this._lastKey) return;
       this._lastKey  = key;
       this._stations = stations;
-      this._sync(!!runningBase, queueActive, runningBase);
+      this._sync(!!effectiveRunningBase, queueActive, effectiveRunningBase);
     }
 
     _sync(anyRunning, queueActive, runningBase) {
@@ -1187,6 +1194,12 @@
           station_id:       sid,
           duration_seconds: dur * 60,
         });
+        // Optimistic update: reflect running state immediately without waiting for binary sensor
+        this._optimisticRunningBase = this._stationById(sid)?.base_name || null;
+        if (this._optimisticRunningBase) {
+          this._lastKey = null; // force re-sync on next hass update
+          this._sync(true, this._lastQueueActive, this._optimisticRunningBase);
+        }
       });
 
       const durInput = tr.querySelector('.dur-input');

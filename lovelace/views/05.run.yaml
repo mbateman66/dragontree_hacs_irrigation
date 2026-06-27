@@ -5,6 +5,5 @@
   - title: Run Stations
     path: run-stations
     icon: mdi:play-circle
-    type: panel
     cards:
       - type: custom:dragontree-irrigation-station-control
