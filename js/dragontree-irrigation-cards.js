@@ -1015,7 +1015,7 @@
   // =========================================================================
 
   const CONTROL_STYLES = `
-    :host { display: block; }
+    :host { display: block; width: fit-content; }
     .card {
       background: var(--ha-card-background, var(--card-background-color, white));
       border-radius: var(--ha-card-border-radius, 12px);
@@ -1028,8 +1028,8 @@
       font-size: 1.5em; font-weight: 500;
       color: var(--ha-card-header-color, var(--primary-text-color));
     }
-    .card-content { padding: 0 16px 16px; overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+    .card-content { padding: 0 16px 16px; }
+    table { width: auto; border-collapse: collapse; font-size: 0.9em; }
     thead th {
       padding: 6px 10px; text-align: left;
       font-size: 0.75em; font-weight: 600; letter-spacing: 0.06em;
@@ -1085,6 +1085,7 @@
       this._editing               = false;
       this._lastKey               = null;
       this._optimisticRunningBase = null;
+      this._optimisticStopped     = false;
       this._lastQueueActive       = false;
 
       if (!this.shadowRoot) {
@@ -1128,9 +1129,11 @@
         return bs && bs.state === 'on';
       })?.base_name || null;
 
-      // Clear optimistic state once HA confirms a station is physically running
+      // Clear optimistic states once real HA state catches up
       if (runningBase) this._optimisticRunningBase = null;
-      const effectiveRunningBase = this._optimisticRunningBase || runningBase;
+      if (!runningBase) this._optimisticStopped = false;
+      const effectiveRunningBase = this._optimisticStopped ? null
+        : (this._optimisticRunningBase || runningBase);
       this._lastQueueActive = queueActive;
 
       const key = stations.map(s =>
@@ -1185,6 +1188,11 @@
 
       tr.querySelector('.stop-btn').addEventListener('click', () => {
         this._hass.callService(DOMAIN, 'stop_station', {});
+        // Optimistic update: clear running state immediately
+        this._optimisticRunningBase = null;
+        this._optimisticStopped     = true;
+        this._lastKey               = null;
+        this._sync(false, this._lastQueueActive, null);
       });
 
       tr.querySelector('.start-btn').addEventListener('click', () => {
