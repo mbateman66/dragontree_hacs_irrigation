@@ -3,7 +3,7 @@
   # Per-station schedules
   ##########################################################################
   - title: Station
-    path: schedules
+    path: stations
     icon: mdi:faucet
     type: panel
     cards:
