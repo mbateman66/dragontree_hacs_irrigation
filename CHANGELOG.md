@@ -4,6 +4,47 @@ All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-06-28
+
+### Added
+- **Run Stations tab** — new dashboard tab for manually starting and stopping individual
+  stations. Each station has a Start button (disabled when any station or queue is running),
+  a Stop button (enabled only when that station is running), and a per-station duration
+  input (in minutes, stored server-side so it persists across browsers/devices). Stopping a
+  station mid-queue marks it as cancelled and advances to the next entry.
+- **Moisture Sensors tab** — new dashboard tab listing all unique moisture sensors
+  configured across stations. Sensors shared by multiple stations are deduplicated. Each
+  row shows the current value and associated station names; clicking a row opens the HA
+  more-info dialog with full sensor history.
+- **`start_station` service** — manually start a station by ID with a specified duration
+  in seconds. Blocked if any station or queue is already running.
+- **`stop_station` service** — stop whatever station is currently running. If a scheduled
+  queue is active, the current station is marked `cancelled` and the queue advances.
+- **`manual_duration` field on stations** — per-station default duration for manual runs
+  (integer, minutes, default 5). Exposed via `sensor.dragontree_irrigation_schedule`
+  attributes and updatable via the existing `update_station` service.
+
+### Fixed
+- **Stop did not work when clicked before binary sensor confirmed start** — the stop
+  handler scanned binary sensors to find the running station, but sensors take 5–6 seconds
+  to update after a start command. If Stop was clicked first, no station was found and no
+  stop was sent to OpenSprinkler. Fixed by tracking `_manual_station_id` in the coordinator
+  so the correct station can be stopped immediately.
+- **Start→Stop UI race** — clicking Stop immediately after Start caused the UI to briefly
+  revert to showing the station as running (delayed binary sensor ON firing after the
+  optimistic stop). Fixed with `_sawOnAfterStop` flag: optimistic stopped state now
+  persists until the binary sensor transitions ON→OFF, confirming the stop.
+- **`stop_station` service not removed on integration unload** — the service handler
+  remained registered after the integration was unloaded.
+- **`OS_SERVICE_STOP` not imported in coordinator** — would have caused a `NameError` on
+  queue timeout paths that call `_stop_any_running_stations`.
+
+### Changed
+- **Dashboard reorganised** — Controller tab removed; global settings moved to new Config
+  tab (alongside station manager). Irrigation Status card moved to top of Calendar tab and
+  now also shows the active station during manual runs. Tab order: Calendar | Run |
+  Moisture | Station | Flow | Config.
+
 ## [1.2.6] - 2026-06-25
 
 ### Fixed
