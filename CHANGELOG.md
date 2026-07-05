@@ -4,6 +4,16 @@ All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.3.1] - 2026-07-05
+
+### Fixed
+- **Renaming a station in OS/HA created a duplicate station on the next restart** —
+  `_merge_discover_stations` matched newly-discovered OpenSprinkler entities against
+  each tracked station's immutable `id`, but renaming only updates `base_name`. On the
+  next restart/reload the renamed station's new entity_id no longer matched any known
+  `id`, so it was re-added as a brand-new station, duplicating every entity for that
+  station. Discovery now matches against current `base_name` instead.
+
 ## [1.3.0] - 2026-06-28
 
 ### Added

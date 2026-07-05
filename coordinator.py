@@ -218,7 +218,12 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         """
         registry = er.async_get(self.hass)
         default_re = re.compile(r"^s\d+$")
-        existing_ids = {s["id"] for s in self._stations}
+        # Match on base_name, not the immutable id: a station keeps its original
+        # id forever (it's the storage/unique_id key), but base_name is updated
+        # when a station is renamed in OS/HA (see async_update_station). Matching
+        # on id here would make a renamed station look "new" again on every
+        # restart and re-add it as a duplicate.
+        existing_base_names = {s.get("base_name", s["id"]) for s in self._stations}
 
         added = 0
         for entry in registry.entities.values():
@@ -231,14 +236,14 @@ class IrrigationCoordinator(DataUpdateCoordinator):
             base_name = (
                 entry.entity_id.removeprefix("switch.").removesuffix("_station_enabled")
             )
-            if base_name in existing_ids:
+            if base_name in existing_base_names:
                 continue
             is_default_name = bool(default_re.match(base_name))
             friendly = base_name.replace("_", " ").title()
             station = _make_station(base_name, friendly)
             station["tracked"] = not is_default_name
             self._stations.append(station)
-            existing_ids.add(base_name)
+            existing_base_names.add(base_name)
             added += 1
 
         if added:
