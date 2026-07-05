@@ -599,6 +599,7 @@
 
     _makeCard(station) {
       const sid = station.base_name;
+      const id  = station.id;
       const el  = document.createElement('div');
       el.className = 'card';
       el.innerHTML = `
@@ -619,21 +620,21 @@
               <span class="slider"></span>
             </label>
           </div>
-          ${this._moisturePanelHTML(sid)}
+          ${this._moisturePanelHTML(sid, id)}
           ${this._panelHTML(sid, 'normal')}
           ${this._panelHTML(sid, 'hot')}
         </div>`;
       return el;
     }
 
-    _moisturePanelHTML(sid) {
+    _moisturePanelHTML(sid, id) {
       return `
         <details class="panel">
           <summary>Moisture Sensor</summary>
           <div class="panel-body">
             <div class="entity-row">
               <span class="row-label">Sensor</span>
-              <select class="mode-select" data-moisture-select data-sid="${sid}">
+              <select class="mode-select" data-moisture-select data-sid="${sid}" data-id="${id}">
                 <option value="">None</option>
               </select>
             </div>
@@ -644,7 +645,7 @@
             <div class="entity-row moisture-max-row" style="display:none">
               <span class="row-label">Skip if above (%)</span>
               <input class="num-input" type="number" min="0" max="100" step="1"
-                     data-moisture-max data-sid="${sid}" />
+                     data-moisture-max data-sid="${sid}" data-id="${id}" />
             </div>
           </div>
         </details>`;
@@ -739,7 +740,7 @@
       this.shadowRoot.querySelectorAll('[data-moisture-select]').forEach(el => {
         el.addEventListener('change', () => {
           this._hass.callService(DOMAIN, 'update_station', {
-            station_id: el.dataset.sid,
+            station_id: el.dataset.id,
             moisture_sensor: el.value,  // empty string clears the association
           });
         });
@@ -750,7 +751,7 @@
           if (e.key === 'Enter')  el.blur();
           if (e.key === 'Escape') {
             const stations = this._hass?.states[SENSOR]?.attributes?.stations || [];
-            const station  = stations.find(s => s.base_name === el.dataset.sid);
+            const station  = stations.find(s => s.id === el.dataset.id);
             el.value = station?.moisture_max ?? '';
             el.blur();
           }
@@ -759,7 +760,7 @@
           const val = parseFloat(el.value);
           if (!isNaN(val)) {
             this._hass.callService(DOMAIN, 'update_station', {
-              station_id: el.dataset.sid,
+              station_id: el.dataset.id,
               moisture_max: val,
             });
           }

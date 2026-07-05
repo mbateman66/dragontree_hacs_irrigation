@@ -4,6 +4,15 @@ All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.3.2] - 2026-07-05
+
+### Fixed
+- **Moisture sensor/threshold updates failed on renamed stations** — the Station
+  Schedules card's moisture panel sent `station.base_name` as the `update_station`
+  service's `station_id`, but the backend looks stations up by their immutable `id`.
+  This was invisible for never-renamed stations (`id == base_name`) but broke as
+  soon as a station was renamed. The panel now sends `station.id`.
+
 ## [1.3.1] - 2026-07-05
 
 ### Fixed
