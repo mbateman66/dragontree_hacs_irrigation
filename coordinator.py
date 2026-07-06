@@ -336,7 +336,20 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         )
 
     # ------------------------------------------------------------------
-    # Scheduling
+    # Queue building and control-flow execution (deliberately base_name-based)
+    # ------------------------------------------------------------------
+    #
+    # NOTE: Functions in this section and _check_entity_health deliberately
+    # construct OpenSprinkler entity_ids from station['base_name'] rather than
+    # using the os_index-based lookup pattern elsewhere in this file (discovery,
+    # listener setup, sensors). This is intentional, not an oversight — see the
+    # design doc's "Scope boundary" section. Correctness here comes from
+    # rename_station keeping base_name atomically accurate whenever a station
+    # is renamed. Do not convert this section to os_index-based lookup.
+    # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Scheduling helpers (called during queue building)
     # ------------------------------------------------------------------
 
     def _setup_time_triggers(self) -> None:
@@ -647,10 +660,6 @@ class IrrigationCoordinator(DataUpdateCoordinator):
             "stations": stations_out,
         }
 
-    # ------------------------------------------------------------------
-    # Queue execution
-    # ------------------------------------------------------------------
-
     async def _recover_running_station(self) -> None:
         """Detect a station that was running when HA restarted and resume the queue.
 
@@ -712,7 +721,11 @@ class IrrigationCoordinator(DataUpdateCoordinator):
                 return
 
     async def _check_entity_health(self) -> None:
-        """Create or dismiss a persistent notification for missing/unavailable OS entities."""
+        """Create or dismiss a persistent notification for missing/unavailable OS entities.
+
+        NOTE: This function deliberately constructs entity_ids from station['base_name']
+        — see the "Queue building and control-flow execution" section header.
+        """
         _NOTIFICATION_ID = "dragontree_irrigation_entity_health"
         _REQUIRED = [
             ("switch",         "{base}_station_enabled"),
