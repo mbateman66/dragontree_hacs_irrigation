@@ -26,3 +26,6 @@ venv/
 *.egg-info/
 dist/
 build/
+
+# Claude Code worktrees/scratch
+.claude/
