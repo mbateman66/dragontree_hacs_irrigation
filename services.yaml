@@ -110,6 +110,37 @@ remove_station:
       selector:
         text:
 
+rename_station:
+  name: Rename Station
+  description: >
+    Rename a station's OpenSprinkler and dragontree_irrigation entity_ids to
+    match a new name (e.g. after renaming the station on the OpenSprinkler
+    controller). Renames every entity_id for the station and updates
+    base_name/friendly_name to match. No restart required.
+  fields:
+    station_id:
+      name: Station ID
+      required: true
+      selector:
+        text:
+    new_base_name:
+      name: New Base Name
+      description: >
+        The new entity_id slug (e.g. "3_driveway_drippers"). Applied to both
+        the OpenSprinkler entities and all dragontree_irrigation entities for
+        this station.
+      required: true
+      selector:
+        text:
+    new_friendly_name:
+      name: New Friendly Name
+      description: >
+        Human-readable display name. Defaults to a title-cased version of
+        new_base_name if omitted.
+      required: false
+      selector:
+        text:
+
 reorder_stations:
   name: Reorder Stations
   description: Set the execution order of stations.

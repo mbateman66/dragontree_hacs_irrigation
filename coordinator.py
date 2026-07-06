@@ -18,6 +18,7 @@ from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.util import slugify
 
 from .const import (
     DAYS_OF_WEEK,
@@ -53,6 +54,7 @@ from .const import (
 )
 from .flow_database import FlowDatabase
 from .flow_monitor import FlowMonitor
+from .os_lookup import find_os_station_entity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -93,6 +95,12 @@ DEFAULT_STATION_TEMPLATE = {
     "id": "",
     "base_name": "",
     "friendly_name": "",
+    "os_index": None,  # permanent internal pointer: OpenSprinkler's physical
+                       # slot number (from the `index` state attribute).
+                       # Never changes once set. Used for lookup only —
+                       # entity_id text is never derived from it.
+    "os_name": "",     # last-synced live OpenSprinkler station name, used
+                       # only to detect that a rename has happened.
     "schedule_mode": SCHEDULE_MODE_NORMAL,
     "sensitive": False,
     "tracked": True,
@@ -106,11 +114,18 @@ DEFAULT_STATION_TEMPLATE = {
 }
 
 
-def _make_station(base_name: str, friendly_name: str) -> dict:
+def _make_station(
+    base_name: str,
+    friendly_name: str,
+    os_index: int | None = None,
+    os_name: str = "",
+) -> dict:
     s = deepcopy(DEFAULT_STATION_TEMPLATE)
     s["id"] = base_name
     s["base_name"] = base_name
     s["friendly_name"] = friendly_name
+    s["os_index"] = os_index
+    s["os_name"] = os_name
     s["normal_schedule"] = deepcopy(DEFAULT_SCHEDULE)
     s["hot_schedule"] = deepcopy(DEFAULT_SCHEDULE)
     return s
@@ -178,6 +193,24 @@ class IrrigationCoordinator(DataUpdateCoordinator):
                 s.setdefault("flow_monitoring", False)
                 s.setdefault("flow_fill_time", DEFAULT_FLOW_FILL_TIME)
                 s.setdefault("manual_duration", DEFAULT_STATION_MANUAL_DURATION)
+                # os_index/os_name backfill: use the station's current
+                # base_name to find its OS switch entity one last time (safe
+                # — no unknown rename is pending at upgrade time). If the
+                # entity happens to be unavailable right now, leave os_index
+                # as None; _merge_discover_stations or a later health check
+                # will pick it up once OpenSprinkler finishes loading.
+                s.setdefault("os_index", None)
+                s.setdefault("os_name", "")
+                if s["os_index"] is None:
+                    switch_state = self.hass.states.get(
+                        f"switch.{s['base_name']}_station_enabled"
+                    )
+                    if switch_state is not None:
+                        s["os_index"] = switch_state.attributes.get("index")
+                        if not s["os_name"]:
+                            s["os_name"] = switch_state.attributes.get("name", "")
+            # Persist backfilled values
+            await self._save()
 
         # Always merge-discover: add any OS stations not yet tracked.
         # On first run (no stored data) this populates _stations from scratch.
@@ -204,46 +237,82 @@ class IrrigationCoordinator(DataUpdateCoordinator):
 
         @callback
         def _schedule_recovery(_hass: HomeAssistant) -> None:
+            self.hass.async_create_task(self._retry_merge_discover_stations())
             self.hass.async_create_task(self._recover_running_station())
             self.hass.async_create_task(self._check_entity_health())
 
         async_at_started(self.hass, _schedule_recovery)
 
-    async def _merge_discover_stations(self) -> None:
-        """Scan OpenSprinkler entity registry and add any stations not yet tracked.
-
-        Default-named stations (s1, s2, …) are added with ignored=True so they
-        appear in the management view but don't affect scheduling until the user
-        explicitly enables them.  Custom-named stations are added with ignored=False.
+    async def _retry_merge_discover_stations(self) -> None:
+        """Re-run discovery once HA has fully started, to backfill os_index
+        for any station that predated it or whose migration backfill raced
+        ahead of OpenSprinkler's own startup (see _merge_discover_stations).
+        Also re-registers listeners in case anything was backfilled, since
+        _setup_os_listeners/_setup_running_listeners/_setup_health_listeners
+        skip any station whose os_index is still None.
         """
-        registry = er.async_get(self.hass)
+        before = {s["id"]: s.get("os_index") for s in self._stations}
+        await self._merge_discover_stations()
+        if any(s.get("os_index") != before.get(s["id"]) for s in self._stations):
+            self._setup_os_listeners()
+            self._setup_running_listeners()
+            self._setup_health_listeners()
+            self._flow_monitor.setup(self._stations)
+
+    async def _merge_discover_stations(self) -> None:
+        """Scan live OpenSprinkler station entities and add any not yet tracked.
+
+        Default-named stations (s1, s2, …) are added with tracked=False so they
+        appear in the management view but don't affect scheduling until the user
+        explicitly enables them. Custom-named stations are added with tracked=True.
+
+        Matches on each OpenSprinkler station's physical `index` (a state
+        attribute on its switch entity), not on any name-derived string. The
+        index is assigned once by the controller's wiring and never changes,
+        so — unlike matching on entity_id text — this can't misidentify an
+        already-tracked station as new after it's been renamed.
+        """
         default_re = re.compile(r"^s\d+$")
-        # Match on base_name, not the immutable id: a station keeps its original
-        # id forever (it's the storage/unique_id key), but base_name is updated
-        # when a station is renamed in OS/HA (see async_update_station). Matching
-        # on id here would make a renamed station look "new" again on every
-        # restart and re-add it as a duplicate.
-        existing_base_names = {s.get("base_name", s["id"]) for s in self._stations}
+        existing_indices = {
+            s["os_index"] for s in self._stations if s.get("os_index") is not None
+        }
+        # Stations that predate os_index, or whose migration backfill couldn't
+        # find their OS entity yet (e.g. OpenSprinkler wasn't ready at startup)
+        # — bridge these to their now-available OS entity by base_name, once.
+        # Once os_index is set this map is never consulted for that station
+        # again, so this narrow use of base_name never causes a duplicate.
+        by_base_name = {
+            s["base_name"]: s for s in self._stations if s.get("os_index") is None
+        }
 
         added = 0
-        for entry in registry.entities.values():
-            if entry.platform != OPENSPRINKLER_DOMAIN:
+        backfilled = 0
+        for state in self.hass.states.async_all("switch"):
+            if state.attributes.get("opensprinkler_type") != "station":
                 continue
-            if not entry.entity_id.startswith("switch."):
+            os_index = state.attributes.get("index")
+            if os_index is None or os_index in existing_indices:
                 continue
-            if not entry.entity_id.endswith("_station_enabled"):
-                continue
-            base_name = (
-                entry.entity_id.removeprefix("switch.").removesuffix("_station_enabled")
+            base_name = state.entity_id.removeprefix("switch.").removesuffix(
+                "_station_enabled"
             )
-            if base_name in existing_base_names:
+
+            stale = by_base_name.get(base_name)
+            if stale is not None:
+                stale["os_index"] = os_index
+                if not stale.get("os_name"):
+                    stale["os_name"] = state.attributes.get("name", "")
+                existing_indices.add(os_index)
+                backfilled += 1
                 continue
+
+            os_name = state.attributes.get("name", "")
             is_default_name = bool(default_re.match(base_name))
             friendly = base_name.replace("_", " ").title()
-            station = _make_station(base_name, friendly)
+            station = _make_station(base_name, friendly, os_index=os_index, os_name=os_name)
             station["tracked"] = not is_default_name
             self._stations.append(station)
-            existing_base_names.add(base_name)
+            existing_indices.add(os_index)
             added += 1
 
         if added:
@@ -251,6 +320,7 @@ class IrrigationCoordinator(DataUpdateCoordinator):
                 "Dragontree Irrigation: added %d new station(s) from OpenSprinkler",
                 added,
             )
+        if added or backfilled:
             await self._save()
 
     # ------------------------------------------------------------------
@@ -266,7 +336,20 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         )
 
     # ------------------------------------------------------------------
-    # Scheduling
+    # Queue building and control-flow execution (deliberately base_name-based)
+    # ------------------------------------------------------------------
+    #
+    # NOTE: Functions in this section and _check_entity_health deliberately
+    # construct OpenSprinkler entity_ids from station['base_name'] rather than
+    # using the os_index-based lookup pattern elsewhere in this file (discovery,
+    # listener setup, sensors). This is intentional, not an oversight — see the
+    # design doc's "Scope boundary" section. Correctness here comes from
+    # rename_station keeping base_name atomically accurate whenever a station
+    # is renamed. Do not convert this section to os_index-based lookup.
+    # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Scheduling helpers (called during queue building)
     # ------------------------------------------------------------------
 
     def _setup_time_triggers(self) -> None:
@@ -297,10 +380,13 @@ class IrrigationCoordinator(DataUpdateCoordinator):
             unsub()
         self._os_unsubs.clear()
 
-        entity_ids = [
-            f"switch.{s['base_name']}_station_enabled"
-            for s in self._stations
-        ]
+        entity_ids = []
+        for s in self._stations:
+            if s.get("os_index") is None:
+                continue
+            eid = find_os_station_entity(self.hass, "switch", s["os_index"])
+            if eid:
+                entity_ids.append(eid)
         if not entity_ids:
             return
 
@@ -319,10 +405,13 @@ class IrrigationCoordinator(DataUpdateCoordinator):
             unsub()
         self._running_unsubs.clear()
 
-        entity_ids = [
-            f"binary_sensor.{s['base_name']}_station_running"
-            for s in self._stations
-        ]
+        entity_ids = []
+        for s in self._stations:
+            if s.get("os_index") is None:
+                continue
+            eid = find_os_station_entity(self.hass, "binary_sensor", s["os_index"])
+            if eid:
+                entity_ids.append(eid)
         if not entity_ids:
             return
 
@@ -365,12 +454,12 @@ class IrrigationCoordinator(DataUpdateCoordinator):
 
         entity_ids = []
         for s in self._stations:
-            base = s["base_name"]
-            entity_ids += [
-                f"switch.{base}_station_enabled",
-                f"binary_sensor.{base}_station_running",
-                f"sensor.{base}_station_status",
-            ]
+            if s.get("os_index") is None:
+                continue
+            for domain in ("switch", "binary_sensor", "sensor"):
+                eid = find_os_station_entity(self.hass, domain, s["os_index"])
+                if eid:
+                    entity_ids.append(eid)
         if not entity_ids:
             return
 
@@ -571,10 +660,6 @@ class IrrigationCoordinator(DataUpdateCoordinator):
             "stations": stations_out,
         }
 
-    # ------------------------------------------------------------------
-    # Queue execution
-    # ------------------------------------------------------------------
-
     async def _recover_running_station(self) -> None:
         """Detect a station that was running when HA restarted and resume the queue.
 
@@ -636,7 +721,11 @@ class IrrigationCoordinator(DataUpdateCoordinator):
                 return
 
     async def _check_entity_health(self) -> None:
-        """Create or dismiss a persistent notification for missing/unavailable OS entities."""
+        """Create or dismiss a persistent notification for missing/unavailable OS entities.
+
+        NOTE: This function deliberately constructs entity_ids from station['base_name']
+        — see the "Queue building and control-flow execution" section header.
+        """
         _NOTIFICATION_ID = "dragontree_irrigation_entity_health"
         _REQUIRED = [
             ("switch",         "{base}_station_enabled"),
@@ -1033,6 +1122,148 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         self.async_set_updated_data(self._build_data())
         await self._check_entity_health()
 
+    _OS_ENTITY_SUFFIXES = {
+        "switch": "_station_enabled",
+        "binary_sensor": "_station_running",
+        "sensor": "_station_status",
+    }
+
+    async def async_rename_station(
+        self,
+        station_id: str,
+        new_base_name: str,
+        new_friendly_name: str | None = None,
+    ) -> None:
+        """Rename a station's OpenSprinkler + dragontree_irrigation entity_ids
+        to a new slug, and update base_name/friendly_name/os_name to match.
+
+        Queue-execution code reads base_name fresh from the station record on
+        every use, so that part needs no re-wiring. But the state-change
+        listeners set up by _setup_os_listeners/_setup_running_listeners/
+        _setup_health_listeners/_flow_monitor.setup subscribe to a *fixed*
+        entity_id string at registration time (find_os_station_entity's
+        os_index-based lookup is only dynamic for one-off calls, not for
+        those long-lived subscriptions) — so renaming entity_id text here
+        DOES require re-registering them, or this station's scheduling,
+        running-detection, health-check, and flow-monitoring all go silently
+        stale until the next restart. See the re-registration calls below.
+        """
+        station = self._get_station(station_id)
+        if not station:
+            raise HomeAssistantError(f"Station '{station_id}' not found")
+
+        old_base_name = station["base_name"]
+        if new_base_name == old_base_name:
+            return
+
+        for s in self._stations:
+            if s["id"] != station_id and s["base_name"] == new_base_name:
+                raise HomeAssistantError(
+                    f"Another station already uses base_name '{new_base_name}'"
+                )
+
+        registry = er.async_get(self.hass)
+        renames: list[tuple[str, str]] = []
+
+        # The 3 OpenSprinkler entities, found by physical index.
+        os_index = station.get("os_index")
+        if os_index is not None:
+            for domain, suffix in self._OS_ENTITY_SUFFIXES.items():
+                old_eid = find_os_station_entity(self.hass, domain, os_index)
+                if not old_eid:
+                    continue
+                if old_eid != f"{domain}.{old_base_name}{suffix}":
+                    _LOGGER.warning(
+                        "Skipping rename of %s: entity_id doesn't match the "
+                        "expected pattern for base_name '%s'",
+                        old_eid, old_base_name,
+                    )
+                    continue
+                renames.append((old_eid, f"{domain}.{new_base_name}{suffix}"))
+
+        # Every dragontree_irrigation entity for this station, found by the
+        # immutable id embedded in unique_id (never by entity_id text).
+        old_obj_prefix = f"{DOMAIN}_{old_base_name}_"
+        unique_prefix = f"{DOMAIN}_{station_id}_"
+
+        # Build a list of all station ids sorted by length (longest first) for disambiguation.
+        # This prevents over-matching when one station's id is a prefix of another's
+        # (e.g., "lawn" and "lawn_back"). The correct owner of an entity is the station
+        # with the LONGEST id that matches the unique_id prefix.
+        candidate_ids = sorted((s["id"] for s in self._stations), key=len, reverse=True)
+
+        for entry in registry.entities.values():
+            if entry.platform != DOMAIN or not entry.unique_id.startswith(unique_prefix):
+                continue
+
+            # Disambiguate: find which station actually owns this entity by longest-match.
+            # For example, if we have stations "lawn" and "lawn_back", an entity
+            # unique_id "dragontree_irrigation_lawn_back_status" matches both prefixes
+            # "dragontree_irrigation_lawn_" and "dragontree_irrigation_lawn_back_",
+            # but "lawn_back" is longer so it is the true owner.
+            owner = next(
+                (sid for sid in candidate_ids if entry.unique_id.startswith(f"{DOMAIN}_{sid}_")),
+                None,
+            )
+            if owner != station_id:
+                # This entity belongs to a different (more-specific) station, skip it.
+                continue
+
+            entity_id = entry.entity_id
+            domain, _, obj_id = entity_id.partition(".")
+            if not obj_id.startswith(old_obj_prefix):
+                _LOGGER.warning(
+                    "Skipping rename of %s: entity_id doesn't start with "
+                    "expected '%s'",
+                    entity_id, old_obj_prefix,
+                )
+                continue
+            suffix = obj_id[len(old_obj_prefix):]
+            renames.append((entity_id, f"{domain}.{DOMAIN}_{new_base_name}_{suffix}"))
+
+        # Pre-flight: verify every target entity_id is free before changing
+        # anything, so a rename either fully applies or doesn't touch
+        # anything at all.
+        for old_eid, new_eid in renames:
+            if old_eid != new_eid and registry.async_get(new_eid) is not None:
+                raise HomeAssistantError(
+                    f"Cannot rename {old_eid} to {new_eid}: entity already exists"
+                )
+
+        for old_eid, new_eid in renames:
+            if old_eid != new_eid:
+                registry.async_update_entity(old_eid, new_entity_id=new_eid)
+
+        live_name = station.get("os_name", "")
+        if os_index is not None:
+            new_switch_eid = find_os_station_entity(self.hass, "switch", os_index)
+            state = self.hass.states.get(new_switch_eid) if new_switch_eid else None
+            if state:
+                live_name = state.attributes.get("name", live_name)
+
+        station["base_name"] = new_base_name
+        station["friendly_name"] = (
+            new_friendly_name or new_base_name.replace("_", " ").title()
+        )
+        station["os_name"] = live_name
+
+        # Re-register every state-change listener touching this station.
+        # find_os_station_entity() re-resolves entity_ids by os_index on every
+        # call, so one-off lookups (sensors, _rename_suggestion, discovery)
+        # never go stale. But async_track_state_change_event() subscribes to
+        # a *fixed* entity_id string at registration time — it does not
+        # follow a later rename. Since this method just changed those
+        # entity_ids' text, the old subscriptions are now watching entities
+        # that no longer exist and must be rebuilt against the new ones.
+        self._setup_os_listeners()
+        self._setup_running_listeners()
+        self._setup_health_listeners()
+        self._flow_monitor.setup(self._stations)
+
+        await self._save()
+        async_dispatcher_send(self.hass, SIGNAL_STATIONS_UPDATED)
+        self.async_set_updated_data(self._build_data())
+
     async def async_reset_flow_profile(self, station_id: str) -> None:
         await self._flow_monitor.async_reset_profile(station_id)
 
@@ -1148,6 +1379,24 @@ class IrrigationCoordinator(DataUpdateCoordinator):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _rename_suggestion(self, station: dict) -> dict:
+        """Compute rename-pending status for a station by comparing its
+        last-synced OS name (os_name) against the live OS name. Computed
+        fresh on every call — nothing here is persisted."""
+        os_index = station.get("os_index")
+        if os_index is None:
+            return {"rename_pending": False}
+        eid = find_os_station_entity(self.hass, "switch", os_index)
+        state = self.hass.states.get(eid) if eid else None
+        live_name = state.attributes.get("name") if state else None
+        if not live_name or live_name == station.get("os_name"):
+            return {"rename_pending": False}
+        return {
+            "rename_pending": True,
+            "suggested_base_name": slugify(live_name),
+            "suggested_friendly_name": live_name,
+        }
 
     def _get_station(self, station_id: str) -> dict | None:
         return next((s for s in self._stations if s["id"] == station_id), None)
