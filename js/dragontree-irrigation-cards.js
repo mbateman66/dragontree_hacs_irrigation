@@ -123,6 +123,33 @@
     }
     .health-warn[hidden] { display: none; }
 
+    .rename-btn {
+      margin-top: 4px; padding: 3px 10px; font-size: 0.75em; cursor: pointer;
+      border-radius: 6px; border: 1px solid var(--warning-color, #ff9800);
+      background: transparent; color: var(--warning-color, #ff9800); font-weight: 600;
+    }
+    .rename-btn:hover { background: var(--warning-color, #ff9800); color: white; }
+    .rename-panel {
+      margin-top: 6px; display: flex; flex-direction: column; gap: 4px;
+      padding: 8px; border-radius: 6px;
+      background: var(--secondary-background-color, #f5f5f5);
+    }
+    .rename-panel input {
+      padding: 4px 8px; font-size: 0.85em;
+      border: 1px solid var(--divider-color, #e0e0e0); border-radius: 5px;
+      background: var(--card-background-color, white); color: var(--primary-text-color);
+    }
+    .rename-actions { display: flex; gap: 6px; margin-top: 2px; }
+    .rename-confirm-btn, .rename-cancel-btn {
+      padding: 4px 10px; font-size: 0.78em; cursor: pointer;
+      border-radius: 5px; border: 1px solid transparent;
+    }
+    .rename-confirm-btn { background: var(--primary-color, #03a9f4); color: white; }
+    .rename-cancel-btn {
+      background: var(--secondary-background-color, #f5f5f5);
+      border-color: var(--divider-color, #e0e0e0); color: var(--primary-text-color);
+    }
+
     .empty {
       text-align: center; padding: 32px 0;
       color: var(--secondary-text-color); font-style: italic;
@@ -239,6 +266,15 @@
             <span class="health-warn" title="" hidden>⚠</span>
           </div>
           <div class="base-label"></div>
+          <button class="rename-btn" hidden>Rename</button>
+          <div class="rename-panel" hidden>
+            <input class="rename-base-input" type="text" placeholder="base_name" />
+            <input class="rename-friendly-input" type="text" placeholder="Friendly Name" />
+            <div class="rename-actions">
+              <button class="rename-confirm-btn">Confirm</button>
+              <button class="rename-cancel-btn">Cancel</button>
+            </div>
+          </div>
         </td>
         <td class="col-friendly">
           <input class="name-input" type="text" />
@@ -314,6 +350,40 @@
         });
       });
 
+      // Rename button — reveals the confirm panel pre-filled with suggestions
+      const renameBtn      = tr.querySelector('.rename-btn');
+      const renamePanel    = tr.querySelector('.rename-panel');
+      const baseInput      = tr.querySelector('.rename-base-input');
+      const friendlyInput  = tr.querySelector('.rename-friendly-input');
+
+      renameBtn.addEventListener('click', () => {
+        const s = this._stationById(tr.dataset.sid);
+        if (!s) return;
+        baseInput.value     = s.suggested_base_name || '';
+        friendlyInput.value = s.suggested_friendly_name || '';
+        renamePanel.hidden  = false;
+        this._editing = true;
+      });
+
+      tr.querySelector('.rename-cancel-btn').addEventListener('click', () => {
+        renamePanel.hidden = true;
+        this._editing = false;
+      });
+
+      tr.querySelector('.rename-confirm-btn').addEventListener('click', () => {
+        const sid         = tr.dataset.sid;
+        const newBase     = baseInput.value.trim();
+        const newFriendly = friendlyInput.value.trim();
+        if (!newBase) return;
+        this._hass.callService(DOMAIN, 'rename_station', {
+          station_id: sid,
+          new_base_name: newBase,
+          new_friendly_name: newFriendly || undefined,
+        });
+        renamePanel.hidden = true;
+        this._editing = false;
+      });
+
       return tr;
     }
 
@@ -330,6 +400,12 @@
 
       tr.querySelector('.os-label').textContent   = this._osName(station.base_name);
       tr.querySelector('.base-label').textContent = station.base_name || '';
+
+      const renameBtn = tr.querySelector('.rename-btn');
+      renameBtn.hidden = !station.rename_pending;
+      if (!station.rename_pending) {
+        tr.querySelector('.rename-panel').hidden = true;
+      }
 
       // Only overwrite the input if it isn't focused (user might be editing)
       const input = tr.querySelector('.name-input');
