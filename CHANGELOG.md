@@ -4,6 +4,40 @@ All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] - 2026-07-06
+
+### Added
+- **Station rename detection and action** — the Manage Stations tab now detects
+  when a station has been renamed on the OpenSprinkler controller (comparing
+  its live name against what was last synced) and shows a "Rename" button.
+  Confirming renames every entity_id for that station — both OpenSprinkler's
+  3 core entities and all of `dragontree_irrigation`'s own ~35 entities — to
+  match, with no restart required. Replaces the manual external-script
+  process used before this release. New `rename_station` service, usable
+  directly from automations/Developer Tools too.
+
+### Changed
+- **Station tracking is now keyed on OpenSprinkler's physical station index**
+  (a stable slot number) instead of name-derived entity_id text, for
+  discovery, listener setup, and the station status/time-remaining sensors.
+  This closes the class of bug fixed narrowly in v1.3.1–v1.3.4 (`id`/`base_name`
+  drift after a rename) at the root, and is the foundation the rename action
+  above is built on. Internal-only change for stations that are never renamed.
+
+### Fixed
+- **Renaming a station could leave its scheduling, running-detection,
+  health-check, and flow-monitoring listeners silently stale** until the next
+  restart — found via live testing. `rename_station` now re-registers all
+  affected listeners immediately after completing a rename.
+- **The Manage Stations rename confirm panel was always visible** on every
+  station row, regardless of whether a rename was pending — a CSS rule set
+  `display: flex` unconditionally, which overrides the browser's default
+  hidden-attribute behavior.
+- **Manage Stations showed "OpenSprinkler" in front of every station's OS
+  name** — the display helper stripped the trailing " Station Enabled"
+  suffix but not the leading "OpenSprinkler " prefix from the entity's live
+  friendly name.
+
 ## [1.3.4] - 2026-07-06
 
 ### Fixed
