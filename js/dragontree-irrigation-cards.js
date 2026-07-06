@@ -470,6 +470,7 @@
         const state = this._hass.states['switch.' + baseName + '_station_enabled'];
         if (state && state.attributes && state.attributes.friendly_name) {
           return state.attributes.friendly_name
+            .replace(/^opensprinkler\s+/i, '')
             .replace(/\s+station\s+enabled$/i, '')
             .replace(/\s+station$/i, '')
             .trim();
