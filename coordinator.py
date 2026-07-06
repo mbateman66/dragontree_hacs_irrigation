@@ -1137,10 +1137,16 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         """Rename a station's OpenSprinkler + dragontree_irrigation entity_ids
         to a new slug, and update base_name/friendly_name/os_name to match.
 
-        Renaming entity_id text here is purely cosmetic: internal tracking
-        (discovery, listener setup) is index-based, and queue-execution code
-        reads base_name fresh from the station record on every use — so
-        nothing needs re-wiring afterward, unlike the pre-os_index design.
+        Queue-execution code reads base_name fresh from the station record on
+        every use, so that part needs no re-wiring. But the state-change
+        listeners set up by _setup_os_listeners/_setup_running_listeners/
+        _setup_health_listeners/_flow_monitor.setup subscribe to a *fixed*
+        entity_id string at registration time (find_os_station_entity's
+        os_index-based lookup is only dynamic for one-off calls, not for
+        those long-lived subscriptions) — so renaming entity_id text here
+        DOES require re-registering them, or this station's scheduling,
+        running-detection, health-check, and flow-monitoring all go silently
+        stale until the next restart. See the re-registration calls below.
         """
         station = self._get_station(station_id)
         if not station:

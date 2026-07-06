@@ -280,11 +280,25 @@ rename_station:
    `os_name = <current live OS name>`. `os_index` and `id` are untouched.
 7. Save, `async_set_updated_data`, dispatch `SIGNAL_STATIONS_UPDATED`.
 
-Note what's *not* in this list, compared to the pre-Phase-1 version of this
+**Correction (found via live testing after this design was implemented):**
+the paragraph below was wrong and the step it describes as unnecessary is
+actually required. `find_os_station_entity`'s index-based lookup is dynamic
+only for one-off calls (sensors, `_rename_suggestion`, discovery) — but
+`async_track_state_change_event` subscriptions (used by
+`_setup_os_listeners`/`_setup_running_listeners`/`_setup_health_listeners`/
+`_flow_monitor.setup`) bind to a *fixed* entity_id string at registration
+time and do not follow a later rename. Renaming entity_id text therefore
+DOES require re-registering all four, or the renamed station's scheduling,
+running-detection, health-check, and flow-monitoring go silently stale
+until the next restart. Step 7 above must include these four calls before
+`_save`/`async_set_updated_data`. The original (incorrect) reasoning is left
+below for the record:
+
+~~Note what's *not* in this list, compared to the pre-Phase-1 version of this
 design: there is no "re-run listener setup because base_name changed" step.
 Since Phase 1 makes all internal lookup index-based, renaming entity_id text
 is now purely cosmetic — nothing internal depends on it, so there's nothing
-to re-wire.
+to re-wire.~~
 
 No restart is required — this is normal runtime service execution, not a code
 change to the integration itself (the restarts we needed today were only

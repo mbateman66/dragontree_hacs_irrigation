@@ -943,10 +943,15 @@ Add this method in `coordinator.py`, directly after `async_remove_station` (whic
         """Rename a station's OpenSprinkler + dragontree_irrigation entity_ids
         to a new slug, and update base_name/friendly_name/os_name to match.
 
-        Renaming entity_id text here is purely cosmetic: internal tracking
-        (discovery, listener setup) is index-based, and queue-execution code
-        reads base_name fresh from the station record on every use — so
-        nothing needs re-wiring afterward, unlike the pre-os_index design.
+        CORRECTION (found via live testing after this plan was implemented):
+        this docstring originally claimed renaming entity_id text was "purely
+        cosmetic" and needed no re-wiring. That was wrong —
+        async_track_state_change_event subscriptions bind to a fixed
+        entity_id string at registration time and do not follow a later
+        rename, unlike find_os_station_entity's one-off dynamic lookups. The
+        implemented fix re-registers _setup_os_listeners/
+        _setup_running_listeners/_setup_health_listeners/_flow_monitor.setup
+        at the end of this method — see commit 619d85d.
         """
         station = self._get_station(station_id)
         if not station:
