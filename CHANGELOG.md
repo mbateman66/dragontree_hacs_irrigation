@@ -4,6 +4,16 @@ All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.3.4] - 2026-07-06
+
+### Fixed
+- **Calendar View showed "Station Time Remaining: unknown" for a running, renamed
+  station** — the Irrigation Status markdown card built the time-remaining
+  entity_id from `current_station_id` (the station's immutable `id`), but that
+  sensor's entity_id follows `base_name`. Invisible for never-renamed stations,
+  but broke as soon as the currently-running station had been renamed. Now
+  resolves the station from `stations` first and uses its `base_name`.
+
 ## [1.3.3] - 2026-07-06
 
 ### Fixed

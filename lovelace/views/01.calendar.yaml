@@ -22,7 +22,7 @@
 
               {%- set cur = (all_stations | selectattr('id', 'equalto', cur_id) | list | first) if all_stations else none %}
               **Current Station:** {{ cur.friendly_name if cur else cur_id }}
-              **Station Time Remaining:** {{ states('sensor.dragontree_irrigation_' ~ cur_id ~ '_time_remaining') }}
+              **Station Time Remaining:** {{ states('sensor.dragontree_irrigation_' ~ (cur.base_name if cur else cur_id) ~ '_time_remaining') }}
               {%- if sched %}
               {%- set q_name = rq | lower %}
               {%- set today = sched | first %}
