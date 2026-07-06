@@ -53,6 +53,7 @@ from .const import (
 )
 from .flow_database import FlowDatabase
 from .flow_monitor import FlowMonitor
+from .os_lookup import find_os_station_entity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -93,6 +94,12 @@ DEFAULT_STATION_TEMPLATE = {
     "id": "",
     "base_name": "",
     "friendly_name": "",
+    "os_index": None,  # permanent internal pointer: OpenSprinkler's physical
+                       # slot number (from the `index` state attribute).
+                       # Never changes once set. Used for lookup only —
+                       # entity_id text is never derived from it.
+    "os_name": "",     # last-synced live OpenSprinkler station name, used
+                       # only to detect that a rename has happened.
     "schedule_mode": SCHEDULE_MODE_NORMAL,
     "sensitive": False,
     "tracked": True,
@@ -106,11 +113,18 @@ DEFAULT_STATION_TEMPLATE = {
 }
 
 
-def _make_station(base_name: str, friendly_name: str) -> dict:
+def _make_station(
+    base_name: str,
+    friendly_name: str,
+    os_index: int | None = None,
+    os_name: str = "",
+) -> dict:
     s = deepcopy(DEFAULT_STATION_TEMPLATE)
     s["id"] = base_name
     s["base_name"] = base_name
     s["friendly_name"] = friendly_name
+    s["os_index"] = os_index
+    s["os_name"] = os_name
     s["normal_schedule"] = deepcopy(DEFAULT_SCHEDULE)
     s["hot_schedule"] = deepcopy(DEFAULT_SCHEDULE)
     return s
@@ -178,6 +192,24 @@ class IrrigationCoordinator(DataUpdateCoordinator):
                 s.setdefault("flow_monitoring", False)
                 s.setdefault("flow_fill_time", DEFAULT_FLOW_FILL_TIME)
                 s.setdefault("manual_duration", DEFAULT_STATION_MANUAL_DURATION)
+                # os_index/os_name backfill: use the station's current
+                # base_name to find its OS switch entity one last time (safe
+                # — no unknown rename is pending at upgrade time). If the
+                # entity happens to be unavailable right now, leave os_index
+                # as None; _merge_discover_stations or a later health check
+                # will pick it up once OpenSprinkler finishes loading.
+                s.setdefault("os_index", None)
+                s.setdefault("os_name", "")
+                if s["os_index"] is None:
+                    switch_state = self.hass.states.get(
+                        f"switch.{s['base_name']}_station_enabled"
+                    )
+                    if switch_state is not None:
+                        s["os_index"] = switch_state.attributes.get("index")
+                        if not s["os_name"]:
+                            s["os_name"] = switch_state.attributes.get("name", "")
+            # Persist backfilled values
+            await self._save()
 
         # Always merge-discover: add any OS stations not yet tracked.
         # On first run (no stored data) this populates _stations from scratch.
