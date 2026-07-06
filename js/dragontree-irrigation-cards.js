@@ -1554,9 +1554,9 @@
 
     _stateKey(hass, stations) {
       return stations.map(s => {
-        const status  = hass.states[`sensor.dragontree_irrigation_${s.id}_flow_status`];
-        const monitor = hass.states[`switch.dragontree_irrigation_${s.id}_flow_monitoring`];
-        const anomaly = hass.states[`binary_sensor.dragontree_irrigation_${s.id}_flow_anomaly`];
+        const status  = hass.states[`sensor.dragontree_irrigation_${s.base_name}_flow_status`];
+        const monitor = hass.states[`switch.dragontree_irrigation_${s.base_name}_flow_monitoring`];
+        const anomaly = hass.states[`binary_sensor.dragontree_irrigation_${s.base_name}_flow_anomaly`];
         const runs    = status?.attributes?.recent_runs?.join(',') || '';
         return `${s.id}:${s.friendly_name}:${monitor?.state}:${status?.state}:${anomaly?.state}:${runs}`;
       }).join('|') + '|' + JSON.stringify(hass.states[SENSOR]?.attributes?.flow_config);
@@ -1662,7 +1662,8 @@
     }
 
     _makeStationCard(station) {
-      const sid = station.id;
+      const sid      = station.id;        // immutable key: DOM matching + service calls
+      const baseName = station.base_name; // current entity_id slug
       const el  = document.createElement('div');
       el.className = 'scard';
       el.dataset.sid = sid;
@@ -1724,7 +1725,7 @@
       // Monitor toggle
       el.querySelector('[data-monitor-toggle]').addEventListener('change', e => {
         this._hass.callService('homeassistant', e.target.checked ? 'turn_on' : 'turn_off', {
-          entity_id: `switch.dragontree_irrigation_${sid}_flow_monitoring`,
+          entity_id: `switch.dragontree_irrigation_${baseName}_flow_monitoring`,
         });
       });
 
@@ -1734,7 +1735,7 @@
       fillInput.addEventListener('keydown', e => {
         if (e.key === 'Enter')  fillInput.blur();
         if (e.key === 'Escape') {
-          const s = this._hass?.states[`number.dragontree_irrigation_${sid}_flow_fill_time`];
+          const s = this._hass?.states[`number.dragontree_irrigation_${baseName}_flow_fill_time`];
           if (s) fillInput.value = s.state;
           fillInput.blur();
         }
@@ -1744,7 +1745,7 @@
         const val = parseInt(fillInput.value, 10);
         if (!isNaN(val)) {
           this._hass.callService('number', 'set_value', {
-            entity_id: `number.dragontree_irrigation_${sid}_flow_fill_time`,
+            entity_id: `number.dragontree_irrigation_${baseName}_flow_fill_time`,
             value: val,
           });
         }
@@ -1753,7 +1754,7 @@
       // Reset button
       el.querySelector('[data-reset-btn]').addEventListener('click', () => {
         this._hass.callService('button', 'press', {
-          entity_id: `button.dragontree_irrigation_${sid}_reset_flow_profile`,
+          entity_id: `button.dragontree_irrigation_${baseName}_reset_flow_profile`,
         });
       });
 
@@ -1828,15 +1829,16 @@
 
       // ── per-station cards ──
       for (const station of stations) {
-        const sid  = station.id;
+        const sid      = station.id;
+        const baseName = station.base_name;
         const card = this.shadowRoot.querySelector(`.scard[data-sid="${sid}"]`);
         if (!card) continue;
 
-        const monitorState = hass.states[`switch.dragontree_irrigation_${sid}_flow_monitoring`];
-        const statusState  = hass.states[`sensor.dragontree_irrigation_${sid}_flow_status`];
-        const baselineState= hass.states[`sensor.dragontree_irrigation_${sid}_flow_baseline`];
-        const anomalyState = hass.states[`binary_sensor.dragontree_irrigation_${sid}_flow_anomaly`];
-        const fillState    = hass.states[`number.dragontree_irrigation_${sid}_flow_fill_time`];
+        const monitorState = hass.states[`switch.dragontree_irrigation_${baseName}_flow_monitoring`];
+        const statusState  = hass.states[`sensor.dragontree_irrigation_${baseName}_flow_status`];
+        const baselineState= hass.states[`sensor.dragontree_irrigation_${baseName}_flow_baseline`];
+        const anomalyState = hass.states[`binary_sensor.dragontree_irrigation_${baseName}_flow_anomaly`];
+        const fillState    = hass.states[`number.dragontree_irrigation_${baseName}_flow_fill_time`];
 
         const isMonitoring = monitorState?.state === 'on';
         const status       = statusState?.state || 'unknown';

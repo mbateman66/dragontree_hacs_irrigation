@@ -4,6 +4,21 @@ All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.3.3] - 2026-07-06
+
+### Fixed
+- **Flow Monitoring tab toggle didn't stick on renamed stations** — the Flow Monitor
+  card built all of its entity_id references (monitoring switch, status/baseline
+  sensors, anomaly binary_sensor, fill-time number, reset button) from
+  `station.id`, but those entity_ids follow `station.base_name`. Invisible for
+  never-renamed stations (`id == base_name`), but on a renamed station the card
+  read and wrote a nonexistent entity — turning the switch on had no effect, and
+  the displayed state (read from the same wrong entity) always fell back to off.
+  The card now uses `station.base_name` for entity_id references and keeps
+  `station.id` only for the DOM key and for `discard_flow_run`/
+  `discard_flow_runs_before` service calls (which target the station's
+  immutable id, as fixed in 1.3.2 for the moisture panel).
+
 ## [1.3.2] - 2026-07-05
 
 ### Fixed
