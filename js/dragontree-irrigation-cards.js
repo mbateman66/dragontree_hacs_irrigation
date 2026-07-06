@@ -134,6 +134,7 @@
       padding: 8px; border-radius: 6px;
       background: var(--secondary-background-color, #f5f5f5);
     }
+    .rename-panel[hidden] { display: none; }
     .rename-panel input {
       padding: 4px 8px; font-size: 0.85em;
       border: 1px solid var(--divider-color, #e0e0e0); border-radius: 5px;
