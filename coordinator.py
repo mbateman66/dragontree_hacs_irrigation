@@ -366,10 +366,13 @@ class IrrigationCoordinator(DataUpdateCoordinator):
             unsub()
         self._os_unsubs.clear()
 
-        entity_ids = [
-            f"switch.{s['base_name']}_station_enabled"
-            for s in self._stations
-        ]
+        entity_ids = []
+        for s in self._stations:
+            if s.get("os_index") is None:
+                continue
+            eid = find_os_station_entity(self.hass, "switch", s["os_index"])
+            if eid:
+                entity_ids.append(eid)
         if not entity_ids:
             return
 
@@ -388,10 +391,13 @@ class IrrigationCoordinator(DataUpdateCoordinator):
             unsub()
         self._running_unsubs.clear()
 
-        entity_ids = [
-            f"binary_sensor.{s['base_name']}_station_running"
-            for s in self._stations
-        ]
+        entity_ids = []
+        for s in self._stations:
+            if s.get("os_index") is None:
+                continue
+            eid = find_os_station_entity(self.hass, "binary_sensor", s["os_index"])
+            if eid:
+                entity_ids.append(eid)
         if not entity_ids:
             return
 
@@ -434,12 +440,12 @@ class IrrigationCoordinator(DataUpdateCoordinator):
 
         entity_ids = []
         for s in self._stations:
-            base = s["base_name"]
-            entity_ids += [
-                f"switch.{base}_station_enabled",
-                f"binary_sensor.{base}_station_running",
-                f"sensor.{base}_station_status",
-            ]
+            if s.get("os_index") is None:
+                continue
+            for domain in ("switch", "binary_sensor", "sensor"):
+                eid = find_os_station_entity(self.hass, domain, s["os_index"])
+                if eid:
+                    entity_ids.append(eid)
         if not entity_ids:
             return
 
