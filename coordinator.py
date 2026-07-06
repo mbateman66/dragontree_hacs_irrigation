@@ -247,17 +247,27 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         """Re-run discovery once HA has fully started, to backfill os_index
         for any station that predated it or whose migration backfill raced
         ahead of OpenSprinkler's own startup (see _merge_discover_stations).
-        Also re-registers listeners in case anything was backfilled, since
-        _setup_os_listeners/_setup_running_listeners/_setup_health_listeners
-        skip any station whose os_index is still None.
+
+        Unconditionally re-registers all OS-entity listeners too — not just
+        when a station's os_index changed. Found via live testing: on a
+        restart where every station's os_index was ALREADY populated from
+        persisted storage (nothing needed backfilling), the *initial*,
+        synchronous _setup_os_listeners() call (inside async_initialize,
+        before HA has finished starting) can still silently register zero
+        listeners if OpenSprinkler's own entities aren't in hass.states yet
+        at that exact moment — find_os_station_entity() returns None for
+        every station, entity_ids ends up empty, and the function returns
+        early with no subscription at all. Gating re-registration on "did
+        os_index change" never catches this, since os_index was fine the
+        whole time; only the live entity lookup raced. By the time this
+        retry runs (after async_at_started), OpenSprinkler is guaranteed
+        ready, so unconditionally rebuilding here is both correct and cheap.
         """
-        before = {s["id"]: s.get("os_index") for s in self._stations}
         await self._merge_discover_stations()
-        if any(s.get("os_index") != before.get(s["id"]) for s in self._stations):
-            self._setup_os_listeners()
-            self._setup_running_listeners()
-            self._setup_health_listeners()
-            self._flow_monitor.setup(self._stations)
+        self._setup_os_listeners()
+        self._setup_running_listeners()
+        self._setup_health_listeners()
+        self._flow_monitor.setup(self._stations)
 
     async def _merge_discover_stations(self) -> None:
         """Scan live OpenSprinkler station entities and add any not yet tracked.
