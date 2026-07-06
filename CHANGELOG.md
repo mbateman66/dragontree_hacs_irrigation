@@ -4,6 +4,22 @@ All notable changes to this project will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.4.1] - 2026-07-06
+
+### Fixed
+- **Rename detection could silently fail to appear after a restart**, even
+  though the underlying station data was correct — found via live testing on
+  a second HA instance sharing the same physical OpenSprinkler controller.
+  `_retry_merge_discover_stations` only re-registered listeners when a
+  station's `os_index` had changed, but a startup race (OpenSprinkler's own
+  entities not yet present in the state machine at the exact moment the
+  initial, synchronous listener setup ran during integration startup) could
+  leave every listener unregistered for the rest of the session even when
+  `os_index` was already correct and nothing needed backfilling. The retry
+  (which runs once HA has fully started, after OpenSprinkler is guaranteed
+  ready) now unconditionally re-registers all OS-entity listeners rather
+  than gating on whether `os_index` changed.
+
 ## [1.4.0] - 2026-07-06
 
 ### Added
