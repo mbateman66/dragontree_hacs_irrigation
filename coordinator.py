@@ -1109,6 +1109,108 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         self.async_set_updated_data(self._build_data())
         await self._check_entity_health()
 
+    _OS_ENTITY_SUFFIXES = {
+        "switch": "_station_enabled",
+        "binary_sensor": "_station_running",
+        "sensor": "_station_status",
+    }
+
+    async def async_rename_station(
+        self,
+        station_id: str,
+        new_base_name: str,
+        new_friendly_name: str | None = None,
+    ) -> None:
+        """Rename a station's OpenSprinkler + dragontree_irrigation entity_ids
+        to a new slug, and update base_name/friendly_name/os_name to match.
+
+        Renaming entity_id text here is purely cosmetic: internal tracking
+        (discovery, listener setup) is index-based, and queue-execution code
+        reads base_name fresh from the station record on every use — so
+        nothing needs re-wiring afterward, unlike the pre-os_index design.
+        """
+        station = self._get_station(station_id)
+        if not station:
+            raise HomeAssistantError(f"Station '{station_id}' not found")
+
+        old_base_name = station["base_name"]
+        if new_base_name == old_base_name:
+            return
+
+        for s in self._stations:
+            if s["id"] != station_id and s["base_name"] == new_base_name:
+                raise HomeAssistantError(
+                    f"Another station already uses base_name '{new_base_name}'"
+                )
+
+        registry = er.async_get(self.hass)
+        renames: list[tuple[str, str]] = []
+
+        # The 3 OpenSprinkler entities, found by physical index.
+        os_index = station.get("os_index")
+        if os_index is not None:
+            for domain, suffix in self._OS_ENTITY_SUFFIXES.items():
+                old_eid = find_os_station_entity(self.hass, domain, os_index)
+                if not old_eid:
+                    continue
+                if old_eid != f"{domain}.{old_base_name}{suffix}":
+                    _LOGGER.warning(
+                        "Skipping rename of %s: entity_id doesn't match the "
+                        "expected pattern for base_name '%s'",
+                        old_eid, old_base_name,
+                    )
+                    continue
+                renames.append((old_eid, f"{domain}.{new_base_name}{suffix}"))
+
+        # Every dragontree_irrigation entity for this station, found by the
+        # immutable id embedded in unique_id (never by entity_id text).
+        old_obj_prefix = f"{DOMAIN}_{old_base_name}_"
+        unique_prefix = f"{DOMAIN}_{station_id}_"
+        for entry in registry.entities.values():
+            if entry.platform != DOMAIN or not entry.unique_id.startswith(unique_prefix):
+                continue
+            entity_id = entry.entity_id
+            domain, _, obj_id = entity_id.partition(".")
+            if not obj_id.startswith(old_obj_prefix):
+                _LOGGER.warning(
+                    "Skipping rename of %s: entity_id doesn't start with "
+                    "expected '%s'",
+                    entity_id, old_obj_prefix,
+                )
+                continue
+            suffix = obj_id[len(old_obj_prefix):]
+            renames.append((entity_id, f"{domain}.{DOMAIN}_{new_base_name}_{suffix}"))
+
+        # Pre-flight: verify every target entity_id is free before changing
+        # anything, so a rename either fully applies or doesn't touch
+        # anything at all.
+        for old_eid, new_eid in renames:
+            if old_eid != new_eid and registry.async_get(new_eid) is not None:
+                raise HomeAssistantError(
+                    f"Cannot rename {old_eid} to {new_eid}: entity already exists"
+                )
+
+        for old_eid, new_eid in renames:
+            if old_eid != new_eid:
+                registry.async_update_entity(old_eid, new_entity_id=new_eid)
+
+        live_name = station.get("os_name", "")
+        if os_index is not None:
+            new_switch_eid = find_os_station_entity(self.hass, "switch", os_index)
+            state = self.hass.states.get(new_switch_eid) if new_switch_eid else None
+            if state:
+                live_name = state.attributes.get("name", live_name)
+
+        station["base_name"] = new_base_name
+        station["friendly_name"] = (
+            new_friendly_name or new_base_name.replace("_", " ").title()
+        )
+        station["os_name"] = live_name
+
+        await self._save()
+        async_dispatcher_send(self.hass, SIGNAL_STATIONS_UPDATED)
+        self.async_set_updated_data(self._build_data())
+
     async def async_reset_flow_profile(self, station_id: str) -> None:
         await self._flow_monitor.async_reset_profile(station_id)
 
