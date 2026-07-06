@@ -127,9 +127,14 @@ Add two fields to the station record (`DEFAULT_STATION_TEMPLATE` in
   switch entity **one last time** (safe: no unknown rename is pending at the
   moment of upgrade, so `base_name` is still a trustworthy pointer for this
   one-time backfill). If a station's OS entity happens to be unavailable at
-  that exact moment (e.g. HA started before OpenSprinkler finished polling),
-  `os_index` is left `None` and backfilled opportunistically on the next
-  `_merge_discover_stations` pass or health check — never crashes startup.
+  that exact moment, `os_index` is left `None` and is not crash-inducing —
+  confirmed by implementation testing to be the common case, since this
+  integration doesn't declare `opensprinkler` as a manifest dependency, so
+  there's no ordering guarantee at HA startup. The reliable fix: `os_index`
+  is retried once HA has fully started (`async_at_started`, the same hook
+  `_recover_running_station`/`_check_entity_health` already use), by which
+  point OpenSprinkler is essentially guaranteed to be ready — see
+  `_retry_merge_discover_stations` in the implementation plan.
 
 `os_name` is intentionally distinct from both `base_name` (the entity_id
 slug) and `friendly_name` (dashboard display text) — a user can edit the

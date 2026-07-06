@@ -181,11 +181,11 @@ git commit -m "Add os_index/os_name fields and OS-entity-by-index lookup helper"
 ### Task 2: Rewrite `_merge_discover_stations` to key on `os_index`
 
 **Files:**
-- Modify: `coordinator.py:212-254`
+- Modify: `coordinator.py:212-254` (`_merge_discover_stations`), `coordinator.py:237-242` (`_schedule_recovery`, inside `async_initialize`)
 
 **Interfaces:**
 - Consumes: `find_os_station_entity` (Task 1, not used directly here but the pattern it establishes), `_make_station(base_name, friendly_name, os_index, os_name)` (Task 1).
-- Produces: discovery no longer creates a duplicate station for one whose `entity_id` was renamed elsewhere (hardens the class of bug fixed narrowly in v1.3.1).
+- Produces: discovery no longer creates a duplicate station for one whose `entity_id` was renamed elsewhere (hardens the class of bug fixed narrowly in v1.3.1). Also produces `IrrigationCoordinator._retry_merge_discover_stations()`, which fixes the startup race Task 1's testing surfaced (OpenSprinkler not yet ready when this integration's own `os_index` backfill runs).
 
 - [ ] **Step 1: Replace `_merge_discover_stations`**
 
@@ -259,12 +259,69 @@ Replace `coordinator.py:212-254`:
 
 Note: this drops the entity-registry scan (`er.async_get(self.hass)` / `registry.entities.values()`) in favor of `hass.states.async_all("switch")` filtered by the `opensprinkler_type` attribute — simpler, and consistent with how Task 1's `find_os_station_entity` works. The `er` import stays in `coordinator.py` (Task 8 uses it for `async_rename_station`).
 
-- [ ] **Step 2: Verify syntax**
+- [ ] **Step 2: Retry the backfill once HA has fully started**
 
-Run: `python3 -m py_compile coordinator.py`
-Expected: no output, exit code 0.
+Task 1's testing surfaced a real race: `async_initialize` (and this rewritten
+`_merge_discover_stations`) run during this integration's own setup, which
+can easily happen *before* OpenSprinkler's own config entry has finished its
+first refresh (`dragontree_irrigation`'s `manifest.json` doesn't declare
+`opensprinkler` as a dependency, so HA gives no ordering guarantee between
+them). When that happens, `os_index`/`os_name` are left `None`/`""` for
+every station — safe (no crash, no duplicate), but not actually backfilled,
+and nothing currently retries it.
 
-- [ ] **Step 3: Deploy to dev and verify no duplicates on restart**
+`async_initialize` already has the right hook for exactly this: it registers
+`_schedule_recovery` via `async_at_started`, which fires only after *all* of
+Home Assistant — not just this integration — has finished starting, by which
+point OpenSprinkler is essentially guaranteed to be ready. Add a call to
+`_merge_discover_stations` there too, so a station left with `os_index: None`
+from the first pass gets a second, much more reliable chance via this same
+function's `by_base_name` fallback (Step 1).
+
+In `coordinator.py`, `_schedule_recovery` currently reads:
+
+```python
+        @callback
+        def _schedule_recovery(_hass: HomeAssistant) -> None:
+            self.hass.async_create_task(self._recover_running_station())
+            self.hass.async_create_task(self._check_entity_health())
+
+        async_at_started(self.hass, _schedule_recovery)
+```
+
+Replace it with:
+
+```python
+        @callback
+        def _schedule_recovery(_hass: HomeAssistant) -> None:
+            self.hass.async_create_task(self._retry_merge_discover_stations())
+            self.hass.async_create_task(self._recover_running_station())
+            self.hass.async_create_task(self._check_entity_health())
+
+        async_at_started(self.hass, _schedule_recovery)
+```
+
+Add this new method directly above `_merge_discover_stations`:
+
+```python
+    async def _retry_merge_discover_stations(self) -> None:
+        """Re-run discovery once HA has fully started, to backfill os_index
+        for any station that predated it or whose migration backfill raced
+        ahead of OpenSprinkler's own startup (see _merge_discover_stations).
+        Also re-registers listeners in case anything was backfilled, since
+        _setup_os_listeners/_setup_running_listeners/_setup_health_listeners
+        skip any station whose os_index is still None.
+        """
+        before = {s["id"]: s.get("os_index") for s in self._stations}
+        await self._merge_discover_stations()
+        if any(s.get("os_index") != before.get(s["id"]) for s in self._stations):
+            self._setup_os_listeners()
+            self._setup_running_listeners()
+            self._setup_health_listeners()
+            self._flow_monitor.setup(self._stations)
+```
+
+- [ ] **Step 4: Deploy to dev and verify no duplicates on restart, and that the backfill retry actually populates os_index**
 
 ```bash
 cp coordinator.py /mnt/ha-dev/config/custom_components/dragontree_irrigation/
@@ -272,13 +329,17 @@ source ~/.config/ha-instances.env
 curl -s -X POST -H "Authorization: Bearer $HA_DEV_TOKEN" "http://$HA_DEV_IP:8123/api/services/homeassistant/restart"
 ```
 
-After dev is back up:
+After dev is back up, **wait about 30 seconds** for the `async_at_started` callback to fire (it runs after HA reports fully started, not immediately on process start), then check:
 
 ```bash
 python3 -c "
 import json
 d = json.load(open('/mnt/ha-dev/config/.storage/dragontree_irrigation'))
 print('station count:', len(d['data']['stations']))
+none_count = sum(1 for s in d['data']['stations'] if s.get('os_index') is None)
+print('stations still missing os_index:', none_count)
+for s in d['data']['stations'][:3]:
+    print(s['id'], '| os_index:', s.get('os_index'), '| os_name:', s.get('os_name'))
 "
 curl -s -H "Authorization: Bearer $HA_DEV_TOKEN" "http://$HA_DEV_IP:8123/api/states" | python3 -c "
 import json, sys
@@ -288,9 +349,9 @@ print('duplicate entities:', len(dupes))
 "
 ```
 
-Expected: station count unchanged from before this task (24 on dev at time of writing), duplicate entities count is 0.
+Expected: station count unchanged from before this task (24 on dev at time of writing), duplicate entities count is 0, **`stations still missing os_index` is 0** (this is the actual fix for the race Task 1 surfaced — if this is still nonzero after waiting 30s, something is wrong and this task is not done), and the 3 sampled stations show real integer `os_index` values and non-empty `os_name`.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add coordinator.py
