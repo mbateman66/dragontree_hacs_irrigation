@@ -143,8 +143,7 @@ association gets orphaned.
 
 ## Resolving OpenSprinkler entities by index
 
-One shared helper, used everywhere the coordinator currently builds an
-OpenSprinkler entity_id string:
+One shared helper:
 
 ```python
 def _find_os_entity(hass: HomeAssistant, domain: str, os_index: int) -> str | None:
@@ -157,7 +156,24 @@ def _find_os_entity(hass: HomeAssistant, domain: str, os_index: int) -> str | No
     return None
 ```
 
-This replaces `base_name`-based string construction in:
+**Scope boundary (deliberately targeted, not exhaustive):** `coordinator.py`
+constructs OpenSprinkler entity_ids from `base_name` in many more places than
+originally scanned for this spec — including the queue-execution / start-stop
+control flow (`_build_queue`, `_recover_running_station`, `_run_queue`,
+`_stop_any_running_stations`, `_stop_station_if_running`,
+`_wait_for_station`, `async_run_station_manual`,
+`async_stop_station_manual`). That code is safety-critical (it's what turns
+physical valves on and off) and is not currently broken — the staleness bugs
+we hit were caused by the *manual, multi-step* rename process (external
+script + separate `update_station` call, with a gap between them for things
+to drift). Once `rename_station` renames entity_ids and updates `base_name`
+atomically in one function call, there's no gap for `base_name` to go stale
+in, so that code doesn't need to change.
+
+`_find_os_entity` therefore replaces `base_name`-based construction in only
+these places — the discovery/dedup logic and the "what do we watch for
+changes" listener setup, not the "what do we command" control flow:
+- `_merge_discover_stations` (coordinator.py) — see rewrite below.
 - `_setup_os_listeners`, `_setup_running_listeners`, `_setup_health_listeners`
   (coordinator.py) — build their watched entity_id lists via `_find_os_entity`
   per station's `os_index`, once per (re)setup call, instead of formatting
@@ -170,6 +186,12 @@ This replaces `base_name`-based string construction in:
   `os_index -> station_id` map, and resolve the changed entity's index from
   its live state attributes in the state-changed callback rather than
   parsing its entity_id.
+
+Everything else that constructs `switch.{base_name}_station_enabled` /
+`binary_sensor.{base_name}_station_running` for queue execution and manual
+start/stop is unchanged and continues to read `station['base_name']`
+directly — correctness there now comes from `rename_station` keeping
+`base_name` atomically accurate, not from index resolution.
 
 Because this lookup is dynamic (computed fresh whenever needed, not cached as
 a string), it self-heals: even if `base_name` and OpenSprinkler's actual
