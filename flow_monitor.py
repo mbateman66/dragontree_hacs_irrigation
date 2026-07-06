@@ -28,6 +28,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_state_change_event
 
 from .flow_database import FlowDatabase
+from .os_lookup import find_os_station_entity
 
 if TYPE_CHECKING:
     from .coordinator import IrrigationCoordinator
@@ -68,33 +69,31 @@ class FlowMonitor:
 
         monitored = [
             s for s in stations
-            if s.get("flow_monitoring", False)
+            if s.get("flow_monitoring", False) and s.get("os_index") is not None
         ]
         if not monitored:
             return
 
-        self._base_name_to_id: dict[str, str] = {
-            s["base_name"]: s["id"] for s in monitored
+        self._index_to_id: dict[int, str] = {
+            s["os_index"]: s["id"] for s in monitored
         }
-        entity_ids = [
-            f"binary_sensor.{s['base_name']}_station_running"
-            for s in monitored
-        ]
+        entity_ids = []
+        for s in monitored:
+            eid = find_os_station_entity(self.hass, "binary_sensor", s["os_index"])
+            if eid:
+                entity_ids.append(eid)
+        if not entity_ids:
+            return
 
         @callback
         def _state_changed(event: Any) -> None:
-            entity_id: str = event.data.get("entity_id", "")
             new_state = event.data.get("new_state")
             old_state = event.data.get("old_state")
             if not new_state:
                 return
 
-            base_name = (
-                entity_id
-                .removeprefix("binary_sensor.")
-                .removesuffix("_station_running")
-            )
-            station_id = self._base_name_to_id.get(base_name)
+            os_index = new_state.attributes.get("index")
+            station_id = self._index_to_id.get(os_index)
             if not station_id:
                 return
 
