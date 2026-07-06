@@ -28,6 +28,7 @@ from .const import (
     SERVICE_DISCARD_FLOW_RUNS_BEFORE,
     SERVICE_MOVE_STATION,
     SERVICE_REMOVE_STATION,
+    SERVICE_RENAME_STATION,
     SERVICE_REORDER_STATIONS,
     SERVICE_RESET_FLOW_PROFILE,
     SERVICE_START_STATION,
@@ -121,6 +122,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             SERVICE_ADD_STATION,
             SERVICE_UPDATE_STATION,
             SERVICE_REMOVE_STATION,
+            SERVICE_RENAME_STATION,
             SERVICE_REORDER_STATIONS,
             SERVICE_UPDATE_SCHEDULE,
             SERVICE_MOVE_STATION,
@@ -226,6 +228,13 @@ def _register_services(hass: HomeAssistant, coordinator: IrrigationCoordinator) 
     async def handle_remove_station(call: ServiceCall) -> None:
         await coordinator.async_remove_station(call.data["station_id"])
 
+    async def handle_rename_station(call: ServiceCall) -> None:
+        await coordinator.async_rename_station(
+            call.data["station_id"],
+            call.data["new_base_name"],
+            call.data.get("new_friendly_name"),
+        )
+
     async def handle_reorder_stations(call: ServiceCall) -> None:
         await coordinator.async_reorder_stations(call.data["station_ids"])
 
@@ -312,6 +321,18 @@ def _register_services(hass: HomeAssistant, coordinator: IrrigationCoordinator) 
         SERVICE_REMOVE_STATION,
         handle_remove_station,
         schema=vol.Schema({vol.Required("station_id"): cv.string}),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RENAME_STATION,
+        handle_rename_station,
+        schema=vol.Schema(
+            {
+                vol.Required("station_id"): cv.string,
+                vol.Required("new_base_name"): cv.string,
+                vol.Optional("new_friendly_name"): cv.string,
+            }
+        ),
     )
     hass.services.async_register(
         DOMAIN,
