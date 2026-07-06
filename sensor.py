@@ -29,6 +29,7 @@ from .const import (
     STATUS_RUNNING,
 )
 from .coordinator import CONTROLLER_DEVICE_INFO, IrrigationCoordinator
+from .os_lookup import find_os_station_entity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -212,9 +213,9 @@ class StationStatusSensor(_StationBaseSensor):
         station = self._get_station()
         # Check whether the physical station is currently running
         is_running = False
-        if station:
-            bs = f"binary_sensor.{station['base_name']}_station_running"
-            bs_state = self.hass.states.get(bs)
+        if station and station.get("os_index") is not None:
+            bs = find_os_station_entity(self.hass, "binary_sensor", station["os_index"])
+            bs_state = self.hass.states.get(bs) if bs else None
             is_running = bs_state is not None and bs_state.state == "on"
 
         if is_running:
@@ -262,10 +263,10 @@ class StationTimeRemainingSensor(_StationBaseSensor):
     @property
     def native_value(self) -> str:
         station = self._get_station()
-        if not station:
+        if not station or station.get("os_index") is None:
             return "n/a"
-        bs = f"binary_sensor.{station['base_name']}_station_running"
-        state = self.hass.states.get(bs)
+        bs = find_os_station_entity(self.hass, "binary_sensor", station["os_index"])
+        state = self.hass.states.get(bs) if bs else None
         if state and state.state == "on":
             end_time_str = state.attributes.get("end_time")
             if end_time_str:
