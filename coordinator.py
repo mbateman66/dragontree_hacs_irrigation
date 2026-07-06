@@ -1166,9 +1166,30 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         # immutable id embedded in unique_id (never by entity_id text).
         old_obj_prefix = f"{DOMAIN}_{old_base_name}_"
         unique_prefix = f"{DOMAIN}_{station_id}_"
+
+        # Build a list of all station ids sorted by length (longest first) for disambiguation.
+        # This prevents over-matching when one station's id is a prefix of another's
+        # (e.g., "lawn" and "lawn_back"). The correct owner of an entity is the station
+        # with the LONGEST id that matches the unique_id prefix.
+        candidate_ids = sorted((s["id"] for s in self._stations), key=len, reverse=True)
+
         for entry in registry.entities.values():
             if entry.platform != DOMAIN or not entry.unique_id.startswith(unique_prefix):
                 continue
+
+            # Disambiguate: find which station actually owns this entity by longest-match.
+            # For example, if we have stations "lawn" and "lawn_back", an entity
+            # unique_id "dragontree_irrigation_lawn_back_status" matches both prefixes
+            # "dragontree_irrigation_lawn_" and "dragontree_irrigation_lawn_back_",
+            # but "lawn_back" is longer so it is the true owner.
+            owner = next(
+                (sid for sid in candidate_ids if entry.unique_id.startswith(f"{DOMAIN}_{sid}_")),
+                None,
+            )
+            if owner != station_id:
+                # This entity belongs to a different (more-specific) station, skip it.
+                continue
+
             entity_id = entry.entity_id
             domain, _, obj_id = entity_id.partition(".")
             if not obj_id.startswith(old_obj_prefix):
