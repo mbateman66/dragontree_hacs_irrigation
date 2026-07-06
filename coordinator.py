@@ -1241,6 +1241,19 @@ class IrrigationCoordinator(DataUpdateCoordinator):
         )
         station["os_name"] = live_name
 
+        # Re-register every state-change listener touching this station.
+        # find_os_station_entity() re-resolves entity_ids by os_index on every
+        # call, so one-off lookups (sensors, _rename_suggestion, discovery)
+        # never go stale. But async_track_state_change_event() subscribes to
+        # a *fixed* entity_id string at registration time — it does not
+        # follow a later rename. Since this method just changed those
+        # entity_ids' text, the old subscriptions are now watching entities
+        # that no longer exist and must be rebuilt against the new ones.
+        self._setup_os_listeners()
+        self._setup_running_listeners()
+        self._setup_health_listeners()
+        self._flow_monitor.setup(self._stations)
+
         await self._save()
         async_dispatcher_send(self.hass, SIGNAL_STATIONS_UPDATED)
         self.async_set_updated_data(self._build_data())
