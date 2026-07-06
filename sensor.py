@@ -162,7 +162,10 @@ class IrrigationScheduleSensor(CoordinatorEntity, SensorEntity):
                 }
                 for day in self.coordinator.day_schedules
             ],
-            "stations": [dict(s) for s in self.coordinator.stations],
+            "stations": [
+                {**dict(s), **self.coordinator._rename_suggestion(s)}
+                for s in self.coordinator.stations
+            ],
             "flow_config": {
                 "flow_sensor_entity": cfg.get("flow_sensor_entity"),
                 "flow_alert_threshold": cfg.get("flow_alert_threshold", 0.25),

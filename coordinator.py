@@ -18,6 +18,7 @@ from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.util import slugify
 
 from .const import (
     DAYS_OF_WEEK,
@@ -1223,6 +1224,24 @@ class IrrigationCoordinator(DataUpdateCoordinator):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _rename_suggestion(self, station: dict) -> dict:
+        """Compute rename-pending status for a station by comparing its
+        last-synced OS name (os_name) against the live OS name. Computed
+        fresh on every call — nothing here is persisted."""
+        os_index = station.get("os_index")
+        if os_index is None:
+            return {"rename_pending": False}
+        eid = find_os_station_entity(self.hass, "switch", os_index)
+        state = self.hass.states.get(eid) if eid else None
+        live_name = state.attributes.get("name") if state else None
+        if not live_name or live_name == station.get("os_name"):
+            return {"rename_pending": False}
+        return {
+            "rename_pending": True,
+            "suggested_base_name": slugify(live_name),
+            "suggested_friendly_name": live_name,
+        }
 
     def _get_station(self, station_id: str) -> dict | None:
         return next((s for s in self._stations if s["id"] == station_id), None)
