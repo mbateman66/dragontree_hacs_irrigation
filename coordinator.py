@@ -236,46 +236,82 @@ class IrrigationCoordinator(DataUpdateCoordinator):
 
         @callback
         def _schedule_recovery(_hass: HomeAssistant) -> None:
+            self.hass.async_create_task(self._retry_merge_discover_stations())
             self.hass.async_create_task(self._recover_running_station())
             self.hass.async_create_task(self._check_entity_health())
 
         async_at_started(self.hass, _schedule_recovery)
 
-    async def _merge_discover_stations(self) -> None:
-        """Scan OpenSprinkler entity registry and add any stations not yet tracked.
-
-        Default-named stations (s1, s2, …) are added with ignored=True so they
-        appear in the management view but don't affect scheduling until the user
-        explicitly enables them.  Custom-named stations are added with ignored=False.
+    async def _retry_merge_discover_stations(self) -> None:
+        """Re-run discovery once HA has fully started, to backfill os_index
+        for any station that predated it or whose migration backfill raced
+        ahead of OpenSprinkler's own startup (see _merge_discover_stations).
+        Also re-registers listeners in case anything was backfilled, since
+        _setup_os_listeners/_setup_running_listeners/_setup_health_listeners
+        skip any station whose os_index is still None.
         """
-        registry = er.async_get(self.hass)
+        before = {s["id"]: s.get("os_index") for s in self._stations}
+        await self._merge_discover_stations()
+        if any(s.get("os_index") != before.get(s["id"]) for s in self._stations):
+            self._setup_os_listeners()
+            self._setup_running_listeners()
+            self._setup_health_listeners()
+            self._flow_monitor.setup(self._stations)
+
+    async def _merge_discover_stations(self) -> None:
+        """Scan live OpenSprinkler station entities and add any not yet tracked.
+
+        Default-named stations (s1, s2, …) are added with tracked=False so they
+        appear in the management view but don't affect scheduling until the user
+        explicitly enables them. Custom-named stations are added with tracked=True.
+
+        Matches on each OpenSprinkler station's physical `index` (a state
+        attribute on its switch entity), not on any name-derived string. The
+        index is assigned once by the controller's wiring and never changes,
+        so — unlike matching on entity_id text — this can't misidentify an
+        already-tracked station as new after it's been renamed.
+        """
         default_re = re.compile(r"^s\d+$")
-        # Match on base_name, not the immutable id: a station keeps its original
-        # id forever (it's the storage/unique_id key), but base_name is updated
-        # when a station is renamed in OS/HA (see async_update_station). Matching
-        # on id here would make a renamed station look "new" again on every
-        # restart and re-add it as a duplicate.
-        existing_base_names = {s.get("base_name", s["id"]) for s in self._stations}
+        existing_indices = {
+            s["os_index"] for s in self._stations if s.get("os_index") is not None
+        }
+        # Stations that predate os_index, or whose migration backfill couldn't
+        # find their OS entity yet (e.g. OpenSprinkler wasn't ready at startup)
+        # — bridge these to their now-available OS entity by base_name, once.
+        # Once os_index is set this map is never consulted for that station
+        # again, so this narrow use of base_name never causes a duplicate.
+        by_base_name = {
+            s["base_name"]: s for s in self._stations if s.get("os_index") is None
+        }
 
         added = 0
-        for entry in registry.entities.values():
-            if entry.platform != OPENSPRINKLER_DOMAIN:
+        backfilled = 0
+        for state in self.hass.states.async_all("switch"):
+            if state.attributes.get("opensprinkler_type") != "station":
                 continue
-            if not entry.entity_id.startswith("switch."):
+            os_index = state.attributes.get("index")
+            if os_index is None or os_index in existing_indices:
                 continue
-            if not entry.entity_id.endswith("_station_enabled"):
-                continue
-            base_name = (
-                entry.entity_id.removeprefix("switch.").removesuffix("_station_enabled")
+            base_name = state.entity_id.removeprefix("switch.").removesuffix(
+                "_station_enabled"
             )
-            if base_name in existing_base_names:
+
+            stale = by_base_name.get(base_name)
+            if stale is not None:
+                stale["os_index"] = os_index
+                if not stale.get("os_name"):
+                    stale["os_name"] = state.attributes.get("name", "")
+                existing_indices.add(os_index)
+                backfilled += 1
                 continue
+
+            os_name = state.attributes.get("name", "")
             is_default_name = bool(default_re.match(base_name))
             friendly = base_name.replace("_", " ").title()
-            station = _make_station(base_name, friendly)
+            station = _make_station(base_name, friendly, os_index=os_index, os_name=os_name)
             station["tracked"] = not is_default_name
             self._stations.append(station)
-            existing_base_names.add(base_name)
+            existing_indices.add(os_index)
             added += 1
 
         if added:
@@ -283,6 +319,7 @@ class IrrigationCoordinator(DataUpdateCoordinator):
                 "Dragontree Irrigation: added %d new station(s) from OpenSprinkler",
                 added,
             )
+        if added or backfilled:
             await self._save()
 
     # ------------------------------------------------------------------
